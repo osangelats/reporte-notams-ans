@@ -4,7 +4,7 @@ on:
   schedule:
     # Lunes a Viernes a las 9:00 AM hora Lima (14:00 UTC)
     - cron: '0 14 * * 1-5'
-  # Permite ejecutarlo con 1 toque desde la app de GitHub en tu celular
+  # Permite ejecutarlo manualmente en cualquier momento desde tu celular o PC
   workflow_dispatch:
 
 jobs:
@@ -22,17 +22,15 @@ jobs:
       - name: Instalar dependencias
         run: pip install openpyxl
 
-      - name: Generar reporte unificado (6 paginas + Excel + WhatsApp + Drive)
+      - name: Generar PDF unificado y subir a Google Drive
         env:
           DRIVE_WEBHOOK_URL: ${{ secrets.DRIVE_WEBHOOK_URL }}
           DRIVE_WEBHOOK_SECRET: ${{ secrets.DRIVE_WEBHOOK_SECRET }}
         run: python generar_reporte_unificado.py
 
-      - name: Adjuntar reporte para descarga directa desde el celular
+      - name: Adjuntar PDF para descarga directa
         uses: actions/upload-artifact@v4
         with:
           name: reporte-notams-ans
-          path: |
-            REPORTE NOTAMS/*REPORTE NOTAMS ANS.pdf
-            REPORTE NOTAMS/*REPORTE NOTAMS WHATSAPP.txt
+          path: REPORTE NOTAMS/*REPORTE NOTAMS ANS.pdf
           retention-days: 7
