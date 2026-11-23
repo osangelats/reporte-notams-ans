@@ -1031,21 +1031,16 @@ def build_unified_report():
             spzo_cards_html.append(card_link(nid, title, body, sched, tone, badge))
 
     # =========================================================================
-    # CONSTRUIR FILAS HTML DE LA TABLA DE OCURRENCIAS OPERACIONALES
+    # CONSTRUIR FILAS HTML SEPARANDO NOVEDADES (ROJO) Y VIGENTES CONTINUOS
     # =========================================================================
     section_order = ["LIMA", "CUSCO", "AEROPUERTOS INTERNACIONALES", "AEROPUERTOS NACIONALES"]
-    table_body_html = []
-    for sec in section_order:
-        sec_rows = [r for r in verified_table_rows if r["section"] == sec]
-        if not sec_rows:
-            continue
-        table_body_html.append(
-            f'<tr class="sec-row"><td colspan="8">{html.escape(sec)} ({len(sec_rows)})</td></tr>'
-        )
-        for idx, r in enumerate(sec_rows):
-            cls = "row-red" if r["is_red"] else ("row-alt" if idx % 2 == 1 else "row-norm")
-            obs_html = html.escape(r["obs"]) if r["obs"] else '<span class="obs-empty">—</span>'
-            table_body_html.append(f"""
+    novedades_rows = [r for r in verified_table_rows if r["is_red"]]
+    vigentes_rows = [r for r in verified_table_rows if not r["is_red"]]
+
+    def render_row_html(r, idx, force_red=False):
+        cls = "row-red" if (force_red or r["is_red"]) else ("row-alt" if idx % 2 == 1 else "row-norm")
+        obs_html = html.escape(r["obs"]) if r["obs"] else '<span class="obs-empty">—</span>'
+        return f"""
             <tr class="{cls}">
               <td class="col-ad">{html.escape(r['aeropuerto'])}</td>
               <td class="col-notam"><a href="#{anchor_id(r['notam'])}" class="tbl-link">{html.escape(r['notam'])}</a></td>
@@ -1056,7 +1051,25 @@ def build_unified_report():
               <td class="col-ini">{html.escape(r['notam_ini'])}</td>
               <td class="col-dias">{r['dias']}</td>
             </tr>
-            """)
+            """
+
+    table_body_html = []
+    if novedades_rows:
+        table_body_html.append(
+            f'<tr class="sec-row sec-row-red"><td colspan="8">NOVEDADES OPERACIONALES · PUBLICADOS, INICIADOS O VENCEN HOY ({len(novedades_rows)})</td></tr>'
+        )
+        for idx, r in enumerate(novedades_rows):
+            table_body_html.append(render_row_html(r, idx, force_red=True))
+
+    for sec in section_order:
+        sec_rows = [r for r in vigentes_rows if r["section"] == sec]
+        if not sec_rows:
+            continue
+        table_body_html.append(
+            f'<tr class="sec-row"><td colspan="8">{html.escape(sec)} ({len(sec_rows)})</td></tr>'
+        )
+        for idx, r in enumerate(sec_rows):
+            table_body_html.append(render_row_html(r, idx))
 
     # =========================================================================
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
@@ -1354,6 +1367,11 @@ def build_unified_report():
     padding: 3.5px 6px;
     letter-spacing: 0.4px;
     border-top: 1.5px solid #0f294a;
+  }}
+  tr.sec-row-red td {{
+    background: #fee2e2;
+    color: #991b1b;
+    border-top: 1.8px solid #c53929;
   }}
   tr.row-norm td {{ background: #ffffff; color: #0f172a; }}
   tr.row-alt td {{ background: #f8fafc; color: #0f172a; }}
