@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*_reporte_unificado.html
+REPORTE NOTAMS/*.pdf
+REPORTE NOTAMS/*.txt
+!REPORTE NOTAMS/REPORTE NOTAMS ANS.xlsx
+telegram_config.json
+.DS_Store

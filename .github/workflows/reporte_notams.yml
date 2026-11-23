@@ -1,0 +1,38 @@
+name: Reporte Diario NOTAMs ANS
+
+on:
+  schedule:
+    # Lunes a Viernes a las 9:00 AM hora Lima (14:00 UTC)
+    - cron: '0 14 * * 1-5'
+  # Permite ejecutarlo con 1 toque desde la app de GitHub en tu celular
+  workflow_dispatch:
+
+jobs:
+  generar-reporte:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install openpyxl
+
+      - name: Generar reporte unificado (6 paginas + Excel + WhatsApp + Drive)
+        env:
+          DRIVE_WEBHOOK_URL: ${{ secrets.DRIVE_WEBHOOK_URL }}
+          DRIVE_WEBHOOK_SECRET: ${{ secrets.DRIVE_WEBHOOK_SECRET }}
+        run: python generar_reporte_unificado.py
+
+      - name: Adjuntar reporte para descarga directa desde el celular
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-notams-ans
+          path: |
+            REPORTE NOTAMS/*REPORTE NOTAMS ANS.pdf
+            REPORTE NOTAMS/*REPORTE NOTAMS WHATSAPP.txt
+          retention-days: 7
