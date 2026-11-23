@@ -239,6 +239,229 @@ def compactar_dias_consecutivos(dias_por_mes):
     return "; ".join(bloques_mes)
 
 
+INTL_ICAOS = {"SPHI", "SPCL", "SPTU", "SPQU", "SPUR", "SPQT", "SPTN", "SPRU", "SPJL"}
+LIMA_ICAOS = {"SPJC", "SPIM", "SPLP"}
+CUSCO_ICAOS = {"SPZO"}
+
+AIRPORT_DISPLAY = {
+    "SPJC": "LIMA AEROPUERTO",
+    "SPIM": "LIMA ACC",
+    "SPLP": "LAS PALMAS",
+    "SPZO": "CUSCO",
+    "SPHI": "CHICLAYO",
+    "SPCL": "PUCALLPA",
+    "SPTU": "PUERTO MALDONADO",
+    "SPST": "TARAPOTO",
+    "SPAS": "ANDOAS",
+    "SPHY": "ANDAHUAYLAS",
+    "SPGM": "TINGO MARÍA",
+    "SPNC": "HUÁNUCO",
+    "SPHO": "AYACUCHO",
+    "SPQU": "AREQUIPA",
+    "SPUR": "PIURA",
+    "SPQT": "IQUITOS",
+    "SPTN": "TACNA",
+    "SPRU": "TRUJILLO",
+    "SPJL": "JULIACA",
+    "SPJA": "JAÉN",
+    "SPJR": "CAJAMARCA",
+    "SPHZ": "ANTA / HUARAZ",
+    "SPJI": "JUANJUÍ",
+    "SPME": "TUMBES",
+    "SPSO": "PISCO",
+    "SPJJ": "JAUJA",
+    "SPYL": "TALARA",
+    "SPLO": "ILO",
+    "SPHU": "HUANUCO",
+}
+
+
+def load_indicadores_ctnav():
+    """Carga el catálogo oficial Indicadores de Lugar CTNAV.xlsx -> {icao: (nombre, distintivo)}."""
+    path = os.path.join(LOCAL_OUT_DIR, "Indicadores de Lugar CTNAV.xlsx")
+    indicadores = {}
+    if not os.path.exists(path):
+        return indicadores
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    for row in ws.iter_rows(min_row=6, values_only=True):
+        if not row or len(row) < 5:
+            continue
+        icao = str(row[2] or "").strip().upper()
+        distintivo = str(row[3] or "").strip()
+        nombre = str(row[4] or "").strip()
+        if len(icao) == 4 and icao.startswith("SP"):
+            indicadores[icao] = (nombre, distintivo)
+    wb.close()
+    return indicadores
+
+
+def extract_item_e(icao_msg):
+    m = re.search(r"\bE\)\s*(.*?)(?=\s*\b[FG]\)|$)", str(icao_msg), re.DOTALL)
+    if m:
+        return re.sub(r"\s+", " ", m.group(1)).strip()
+    return re.sub(r"\s+", " ", str(icao_msg)).strip()
+
+
+def extract_item_d(icao_msg):
+    m = re.search(r"\bD\)\s*(.*?)(?=\s*\bE\)|$)", str(icao_msg), re.DOTALL)
+    if m:
+        return re.sub(r"\s+", " ", m.group(1)).strip()
+    return ""
+
+
+def extract_replaced_notam(icao_msg):
+    m = re.search(r"\bNOTAMR\s+([A-Z]\d{4}/\d{2})", str(icao_msg))
+    return m.group(1) if m else None
+
+
+def is_movement_area_spjc_spzo(icao, msg_e):
+    if icao not in ("SPJC", "SPZO"):
+        return False
+    u = msg_e.upper()
+    # Excluir L2 / obstaculos en trayectoria, TSA, SPR91, 121.5, A-CDM
+    if any(k in u for k in ("121.5", "LINEA 2", "CLIMB GRADIENT", "GRADIENTE", "SPR91", "AIR DISPLAY", "PARACHUTE", "TSA ", "GUN FIRING", "A-CDM")):
+        return False
+    return any(k in u for k in ("RWY", "TWY", "TXL", "HOLDING", "TURN", "180 DEG", "TORA", "TODA", "ASDA", "LDA", "STRIP", "MARKING", "PAVEMENT", "CROSSING", "SEGREGATED"))
+
+
+def is_ans_reportable(n_obj, indicadores):
+    """Aplica las 14 reglas para filtrar solo NOTAMs ANS reportables."""
+    icao = str(n_obj.get("facilityDesignator", "")).strip().upper()
+    msg = str(n_obj.get("icaoMessage", "")).upper()
+    e_txt = extract_item_e(msg).upper()
+
+    # Regla 3: horarios de servicio AIP
+    if any(k in e_txt for k in ("HR SER", "SER HR", "AVBL O/R", "OPR HR", "AD HR", "ATS HR", "TWR HR")):
+        return False
+    # Regla 9: Costa Verde aerodeportiva
+    if any(k in e_txt for k in ("COSTA VERDE", "PARAPENTE", "PARATRIKE", "AERODEPORTIVA")):
+        return False
+    # Regla 12: SEI / RFFS salvo afectacion directa ANS
+    if any(k in e_txt for k in ("RFFS", "FIRE FIGHTING", "RESCUE AND FIRE", "SEI ")) and not any(k in e_txt for k in ("RWY", "TWY", "ILS", "VOR", "DME", "ATS", "TWR")):
+        return False
+    # Regla 13: Puestos de estacionamiento (PEA / ACFT STAND)
+    if any(k in e_txt for k in ("ACFT STAND", "PARKING STAND", "PEA ", "STANDS ")) and "TXL" not in e_txt:
+        return False
+    # Ruido administrativo / publicaciones / RPAS / globos / HLP / grass cutting
+    if any(k in e_txt for k in ("CHECKLIST", "TRIGGER NOTAM", "AIP AMDT", "REF AIP", "WEF ", "SUP AIP")) and "A-CDM" not in e_txt:
+        return False
+    if any(k in e_txt for k in ("RPAS", "DRONE", "PROBE BALLOON", "GRASS CUTTING", "VIRAJE LENTO", "REF RD ", "PCN ")):
+        return False
+    if e_txt.startswith("HLP ") or "HELIPUERTO" in e_txt:
+        return False
+    # Obstaculos menores fuera de pista/gradiente (ej. gruas urbanas lejos del AD)
+    if e_txt.startswith("OBST ") and "RWY" not in e_txt and "GRADIENT" not in e_txt:
+        return False
+    # Regla 4: Aerodromos cerrados solo si tienen distintivo de llamada en CTNAV
+    if ("AD CLSD" in e_txt or "AD CERRADO" in e_txt) and icao not in INTL_ICAOS and icao not in LIMA_ICAOS and icao not in CUSCO_ICAOS:
+        _, distintivo = indicadores.get(icao, ("", ""))
+        if not distintivo:
+            return False
+    # SPLP solo si es relevante; SPR91/paracaidismo de Lima ya salen por SPJC/SPIM
+    if icao == "SPLP" and not any(k in e_txt for k in ("AD CLSD", "RWY")):
+        return False
+
+    # Solo incluir NOTAMs publicados recientemente (>= 2026-11-20 18:00) o con patron operacional ANS clave
+    iss_str = str(n_obj.get("issueDate", "")).strip()
+    is_recent = iss_str >= "2026-11-20 18:00:00"
+    is_core_ans = any(k in e_txt for k in (
+        "RWY", "TWY", "ILS", "VOR", "DME", "APAPI", "PAPI", "BIRD HAZARD",
+        "VENTEO DE GAS", "TSA ", "PARACHUTE", "AIR DISPLAY", "GUN FIRING",
+        "IAC ", "SID ", "STAR ", "GRADIENT", "AD CLSD"
+    ))
+    return is_recent and is_core_ans
+
+
+def utc_hhmm_to_local_str(hhmm):
+    h, m = int(hhmm[:2]), int(hhmm[2:4])
+    lh = (h - 5) % 24
+    return f"{lh:02d}:{m:02d}"
+
+
+def format_d_schedule_local(d_str, start_utc_str):
+    """Convierte campo D (fechas y horarios UTC) a texto limpio en hora local con 'del XX al XX'."""
+    if not d_str:
+        return ""
+    u = d_str.upper()
+    meses_en = {
+        "JAN": "enero", "FEB": "febrero", "MAR": "marzo", "APR": "abril",
+        "MAY": "mayo", "JUN": "junio", "JUL": "julio", "AUG": "agosto",
+        "SEP": "septiembre", "OCT": "octubre", "NOV": "noviembre", "DEC": "diciembre",
+    }
+    # Detectar rango horario HHMM-HHMM
+    hm = re.search(r"(\d{4})-(\d{4})", u)
+    shift_day = 0
+    hora_txt = ""
+    if hm:
+        h1 = int(hm.group(1)[:2])
+        if h1 < 5:
+            shift_day = -1
+        hora_txt = f"de {utc_hhmm_to_local_str(hm.group(1))} a {utc_hhmm_to_local_str(hm.group(2))}"
+
+    # Detectar meses y dias si existen
+    tokens = re.findall(r"(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|\d{2})", u.split(hm.group(0))[0] if hm else u)
+    dias_por_mes = {}
+    cur_mes = None
+    year = int(str(start_utc_str)[:4]) if start_utc_str else 2026
+    month_num_map = {k: i + 1 for i, k in enumerate(["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
+    for tok in tokens:
+        if tok in meses_en:
+            cur_mes = tok
+        elif tok.isdigit() and cur_mes:
+            d_num = int(tok)
+            dt_utc = date(year, month_num_map[cur_mes], d_num) + timedelta(days=shift_day)
+            m_es = list(meses_en.values())[dt_utc.month - 1]
+            dias_por_mes.setdefault(m_es, []).append(dt_utc.day)
+
+    fechas_txt = compactar_dias_consecutivos(dias_por_mes) if dias_por_mes else ""
+    if fechas_txt and hora_txt:
+        return f"{hora_txt} en fechas programadas ({fechas_txt})"
+    return hora_txt or fechas_txt
+
+
+def translate_icao_to_spanish(n_obj):
+    """Traduce automáticamente un NOTAM nuevo de OACI (E + D) a español claro para la tabla y WhatsApp."""
+    e_raw = extract_item_e(n_obj.get("icaoMessage", ""))
+    d_raw = extract_item_d(n_obj.get("icaoMessage", ""))
+    sched = format_d_schedule_local(d_raw, n_obj.get("startDate", ""))
+    u = e_raw.upper()
+
+    # Patrones frecuentes CTNAV
+    m_rwy = re.match(r"RWY\s+([0-9/LRC]+)\s+CLSD(?:\s+DUE\s+TO\s+WIP)?", u)
+    if m_rwy:
+        base = f"Pista {m_rwy.group(1)} cerrada por trabajos de mantenimiento" if "WIP" in u else f"Pista {m_rwy.group(1)} cerrada"
+        return f"{base} {sched}.".strip() if sched else f"{base}."
+
+    m_twy = re.match(r"TWY\s+([A-Z0-9,\s/]+?)\s+CLSD(?:\s+DUE\s+TO\s+WIP)?", u)
+    if m_twy:
+        base = f"Calles de rodaje {m_twy.group(1).strip()} cerradas por trabajos de mantenimiento" if "WIP" in u else f"Calles de rodaje {m_twy.group(1).strip()} cerradas"
+        return f"{base} {sched}.".strip() if sched else f"{base}."
+
+    m_apapi = re.match(r"(PAPI|APAPI)\s+RWY\s+([0-9/LRC]+)\s+INOP", u)
+    if m_apapi:
+        return f"{m_apapi.group(1)} de pista {m_apapi.group(2)} inoperativo."
+
+    m_bird = re.match(r"BIRD\s+HAZARD\s+RWY\s+([0-9/LRC]+)", u)
+    if m_bird:
+        return f"Peligro de aves en pista {m_bird.group(1)}."
+
+    if "AD CLSD" in u:
+        return "Aeródromo cerrado de forma permanente." if str(n_obj.get("endDate", "")).upper() == "PERM" else "Aeródromo cerrado."
+
+    # Si ya viene en español (ej. VENTEO DE GAS), limpiar coordenadas largas y convertir horario si aplica
+    txt = e_raw
+    txt = re.sub(r"\s*COORD:.*$", "", txt, flags=re.IGNORECASE).strip()
+    txt = re.sub(r"\s*F\)G.*$", "", txt, flags=re.IGNORECASE).strip()
+    if txt.isupper():
+        txt = txt.capitalize()
+    if sched and sched not in txt:
+        txt = f"{txt.rstrip('.')} ({sched})."
+    elif not txt.endswith("."):
+        txt += "."
+    return txt
+
+
 def build_spjc_svg_base_labels():
     """Etiquetas limpias sobre el plano base SPJC (viewBox 0 0 1800 1200)."""
     # Coordenadas calibradas del PDF oficial (norm_x*1.8, norm_y*1.2)
@@ -509,9 +732,9 @@ def build_unified_report():
     spzo_bg_uri = img_to_data_uri(os.path.join(ASSETS_DIR, "spzo_map_bg.png"))
 
     # =========================================================================
-    # DATOS DE LA TABLA DE OCURRENCIAS OPERACIONALES (SIN AREA DE MOVIMIENTO SPJC Y SPZO)
-    # Formato: (seccion, aeropuerto, notam_actual, texto_espanol, obs_relacion, notam_inicial, fecha_pub_inicial)
+    # DATOS DE LA TABLA DE OCURRENCIAS OPERACIONALES (CURADOS + DESCUBRIMIENTO EN VIVO)
     # =========================================================================
+    indicadores = load_indicadores_ctnav()
     table_specs = [
         # 1. LIMA (Solo ocurrencias no pertenecientes al area de movimiento SPJC)
         (
@@ -582,25 +805,20 @@ def build_unified_report():
         (
             "AEROPUERTOS INTERNACIONALES",
             "CHICLAYO",
-            "A3734/26",
-            "Pista 01/19 cerrada por trabajos de mantenimiento de 23:00 a 04:00 en noches programadas ("
-            + compactar_dias_consecutivos({
-                "noviembre": [21, 22, 23, 25, 26, 28, 29, 30],
-                "diciembre": [2, 3, 5, 6, 7, 9, 10, 12, 13, 14, 16, 17, 19, 20, 21, 23, 24, 26, 27, 28, 30],
-            })
-            + ").",
-            "Asociado a A3735/26 (cierre simultáneo de calles de rodaje).",
-            "A3734/26",
-            date(2026, 11, 20),
+            "A3745/26",
+            translate_icao_to_spanish(active["A3745/26"]) if "A3745/26" in active else "",
+            "Asociado a A3748/26 (cierre simultáneo de calles de rodaje).",
+            "A3745/26",
+            date(2026, 11, 21),
         ),
         (
             "AEROPUERTOS INTERNACIONALES",
             "CHICLAYO",
-            "A3735/26",
+            "A3748/26",
             "Calles de rodaje A, B, B1, C, D y D1 cerradas por trabajos de mantenimiento de 23:00 a 04:00 en las mismas noches programadas del cierre de pista.",
-            "Asociado a A3734/26 (cierre simultáneo de pista 01/19).",
-            "A3735/26",
-            date(2026, 11, 20),
+            "Asociado a A3745/26 (cierre simultáneo de pista 01/19).",
+            "A3748/26",
+            date(2026, 11, 21),
         ),
         (
             "AEROPUERTOS INTERNACIONALES",
@@ -661,14 +879,16 @@ def build_unified_report():
 
     # Filtrar estrictamente contra active (vigencia en tiempo real garantizada!)
     verified_table_rows = []
+    known_ids = set()
     for sec, ad, nid, txt, obs, n_ini, f_ini in table_specs:
         if nid not in active:
             print(f"  [OMITIDO POR VENCIMIENTO] {nid} ({ad})")
             continue
+        known_ids.add(nid)
         n_obj = active[nid]
         desde_str = fmt_local(n_obj.get("startDate"))
         hasta_str = fmt_local(n_obj.get("endDate"))
-        dias = max(0, (today_date - f_ini).days)
+        dias = max(1, (today_date - f_ini).days) if f_ini >= today_date - timedelta(days=2) else max(0, (today_date - f_ini).days)
         red = is_red_notam(n_obj, today_date, cutoff_local_dt)
         verified_table_rows.append({
             "section": sec,
@@ -684,6 +904,63 @@ def build_unified_report():
             "raw": n_obj,
         })
 
+    # Descubrimiento automático en vivo de cualquier NOTAM ANS nuevo publicado hoy o en adelante
+    pre_mapped_planos = {
+        "A3730/26", "A3513/26", "A3723/26", "A3722/26", "A3721/26", "A3720/26",
+        "A3695/26", "A3719/26", "A3696/26", "A3725/26", "A3718/26", "A3717/26",
+        "A3729/26", "A3523/26", "A2828/26", "A2830/26", "A2827/26", "A3424/26",
+        "A3341/26", "A3527/26", "A2863/26", "A3740/26", "A3707/26", "A3711/26",
+    }
+    extra_spjc_cards = []
+    extra_spzo_cards = []
+    for nid, n_obj in sorted(active.items(), key=lambda x: (str(x[1].get("facilityDesignator", "")), x[0])):
+        if nid in known_ids or nid in pre_mapped_planos:
+            continue
+        if not is_ans_reportable(n_obj, indicadores):
+            continue
+        icao = str(n_obj.get("facilityDesignator", "")).strip().upper()
+        msg_e = extract_item_e(n_obj.get("icaoMessage", ""))
+        if is_movement_area_spjc_spzo(icao, msg_e):
+            sched = f"Vig: {fmt_local_short(n_obj.get('startDate'))} - {fmt_local_short(n_obj.get('endDate'))} LOCAL"
+            if icao == "SPJC":
+                extra_spjc_cards.append((nid, "SPJC Nuevo", translate_icao_to_spanish(n_obj), sched, "red"))
+            else:
+                extra_spzo_cards.append((nid, "SPZO Nuevo", translate_icao_to_spanish(n_obj), sched, "red"))
+            continue
+
+        if icao in LIMA_ICAOS:
+            sec = "LIMA"
+        elif icao in CUSCO_ICAOS:
+            sec = "CUSCO"
+        elif icao in INTL_ICAOS:
+            sec = "AEROPUERTOS INTERNACIONALES"
+        else:
+            sec = "AEROPUERTOS NACIONALES"
+
+        ad_name = AIRPORT_DISPLAY.get(icao) or indicadores.get(icao, (icao, ""))[0].upper() or icao
+        replaced = extract_replaced_notam(n_obj.get("icaoMessage", ""))
+        n_ini = replaced or nid
+        iss_str = str(n_obj.get("issueDate", ""))[:10]
+        try:
+            f_ini = datetime.strptime(iss_str, "%Y-%m-%d").date()
+        except Exception:
+            f_ini = today_date
+        dias = max(1, (today_date - f_ini).days)
+        verified_table_rows.append({
+            "section": sec,
+            "aeropuerto": ad_name,
+            "notam": nid,
+            "texto": translate_icao_to_spanish(n_obj),
+            "desde": fmt_local(n_obj.get("startDate")),
+            "hasta": fmt_local(n_obj.get("endDate")),
+            "obs": "",
+            "notam_ini": n_ini,
+            "dias": dias,
+            "is_red": is_red_notam(n_obj, today_date, cutoff_local_dt),
+            "raw": n_obj,
+        })
+        print(f"  [NUEVO DETECTADO EN VIVO] {nid} ({ad_name}) -> {sec}")
+
     # =========================================================================
     # CONSTRUCCION DE TARJETAS PARA PAGINA 1 (LIMA SPJC) Y PAGINA 2 (CUSCO SPZO)
     # =========================================================================
@@ -692,7 +969,7 @@ def build_unified_report():
         ("A3513/26", "TXL T BLUE", "Rodaje limitado entre puestos 601 y 202 por obras. Precaución en rodaje (punto de referencia del sector).", "Vig: 03/11 07:00 - 13/12 15:00 · Horario: 07:00-15:00 LOCAL", "amber"),
     ]
     spjc_day_cards_html = []
-    for nid, title, body, sched, tone in spjc_day_cards_spec:
+    for nid, title, body, sched, tone in spjc_day_cards_spec + extra_spjc_cards:
         if nid in active:
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_day_cards_html.append(card_link(nid, title, body, sched, tone, badge))
@@ -747,7 +1024,7 @@ def build_unified_report():
         ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de calle de rodaje C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
     ]
     spzo_cards_html = []
-    for spec in spzo_cards_spec:
+    for spec in spzo_cards_spec + extra_spzo_cards:
         if spec:
             nid, title, body, sched, tone = spec
             badge = "NUEVO HOY" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
@@ -785,10 +1062,10 @@ def build_unified_report():
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
     # =========================================================================
     cited_ids = []
-    for nid, *_ in spjc_day_cards_spec + spjc_night_top_spec + spjc_night_bot_spec + spjc_procs_spec:
+    for nid, *_ in spjc_day_cards_spec + extra_spjc_cards + spjc_night_top_spec + spjc_night_bot_spec + spjc_procs_spec:
         if nid in active and nid not in cited_ids:
             cited_ids.append(nid)
-    for spec in spzo_cards_spec:
+    for spec in spzo_cards_spec + extra_spzo_cards:
         if spec and spec[0] in active and spec[0] not in cited_ids:
             cited_ids.append(spec[0])
     for r in verified_table_rows:
@@ -1368,15 +1645,17 @@ def build_unified_report():
     for col, htxt in headers:
         ws.cell(12, col).value = htxt
 
-    # Limpiar filas 13 a 65
-    for r in range(13, 65):
+    # Descombinar cualquier celda combinada residual en filas >= 13 y limpiar filas 13 a 100
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 13:
+            ws.unmerge_cells(str(rng))
+    for r in range(13, 100):
         for c in range(1, 15):
             cell = ws.cell(r, c)
-            if type(cell).__name__ != "MergedCell":
-                cell.value = None
-                cell.hyperlink = None
-                cell.fill = PatternFill(fill_type=None)
-                cell.border = Border()
+            cell.value = None
+            cell.hyperlink = None
+            cell.fill = PatternFill(fill_type=None)
+            cell.border = Border()
 
     font_black = Font(name="Arial", size=8, color="000000")
     font_red = Font(name="Arial", size=8, color="C53929", bold=True)
@@ -1438,17 +1717,39 @@ def build_unified_report():
     print(f"Excel actualizado: {local_xlsx}")
 
     # =========================================================================
-    # GENERAR TEXTO PLANO PARA WHATSAPP / TELEGRAM (SIN AREA MOVIMIENTO SPJC/SPZO, 13 REGLAS)
+    # GENERAR TEXTO PLANO DINAMICO PARA WHATSAPP / TELEGRAM (SIN AREA MOVIMIENTO SPJC/SPZO, 14 REGLAS)
     # =========================================================================
+    red_rows = [r for r in verified_table_rows if r["is_red"]]
+    if red_rows:
+        nov_parts = [f"{r['aeropuerto'].title()}: {r['texto'].rstrip('.')} (NOTAM {r['notam']})" for r in red_rows]
+        novedades_txt = (
+            f"Buenos dias, se adjunta reporte del {today_date.day:02d} de {meses[today_date.month]} "
+            f"(incluye planos graficos del area de movimiento de Lima y Cusco en las paginas 1 y 2). "
+            + ". ".join(nov_parts)
+            + "."
+        )
+    else:
+        novedades_txt = (
+            f"Buenos dias, se adjunta reporte del {today_date.day:02d} de {meses[today_date.month]} "
+            f"(incluye planos graficos del area de movimiento de Lima y Cusco en las paginas 1 y 2). "
+            f"Sin novedades operacionales nuevas desde el ultimo corte."
+        )
+
+    comp_rows = sorted(verified_table_rows, key=lambda x: (x["aeropuerto"], x["notam"]))
+    comp_lines = []
+    for idx, r in enumerate(comp_rows, start=1):
+        rep_note = f" - repetido desde {r['notam_ini']}" if r["notam_ini"] != r["notam"] and r["dias"] > 15 else ""
+        comp_lines.append(f"{idx}. {r['aeropuerto'].title()}: {r['texto'].rstrip('.')} (NOTAM {r['notam']}{rep_note}).")
+
     wa_text = f"""================================================================================
 REPORTE DIARIO DE NOTAMs - SERVICIOS DE NAVEGACION AEREA (ANS)
 Fecha: {fecha_larga} (expresados en hora local)
 Direccion General de Aeronautica Civil - DGAC / CTNAV
 ================================================================================
 
---- NOVEDADES OPERACIONALES RELEVANTES (DESDE AYER A LAS 6:00 PM HASTA HOY) ---
+--- NOVEDADES OPERACIONALES RELEVANTES (DESDE EL ULTIMO CORTE HASTA HOY) ---
 
-Buenos dias, se adjunta reporte del {today_date.day:02d} de {meses[today_date.month]} (incluye planos graficos del area de movimiento de Lima y Cusco en las paginas 1 y 2). En Lima aeropuerto se actualizo el festival aerodeportivo en zona restringida SPR91 de 10:00 a 18:00 hasta el 22 de noviembre (NOTAM A3731/26) y se programo zona temporalmente segregada por ejercicios de tiro en Salinas Huacho para el 25 de noviembre de 10:00 a 15:00 (NOTAM A3732/26), ademas de la actualizacion del cierre de pista 16L/34R (NOTAM A3730/26) y cierres nocturnos en calles U y V3 para mañana (NOTAM A3729/26) detallados en el plano de Lima. En Cusco se amplio la prohibicion de giro de 180 grados a toda la pista 10/28 hasta el 20 de diciembre (NOTAM A3740/26 en reemplazo de A3712/26, detallado en el plano de Cusco). En Chiclayo se publicaron cierres nocturnos de pista 01/19 y calles de rodaje A, B, B1, C, D y D1 por trabajos de mantenimiento de 23:00 a 04:00 en fechas programadas desde mañana hasta el 31 de diciembre (NOTAM A3734/26 y A3735/26). Concluyeron la limitacion AIS/ARO en Lima (NOTAM A3736/26), la interferencia GNSS en Piura (NOTAM C3896/26) y la suspension de salidas SID en Lima por DVOR/DME LPA (NOTAM A3714/26).
+{novedades_txt}
 
 
 --- COMPENDIO DE NOTAMs VIGENTES DE NAVEGACION AEREA ---
@@ -1456,20 +1757,7 @@ Buenos dias, se adjunta reporte del {today_date.day:02d} de {meses[today_date.mo
 Reporte del {fecha_larga} (expresados en hora local):
 (Los NOTAMs del area de movimiento de Lima y Cusco figuran graficamente en los planos adjuntos).
 
-1. Andahuaylas: ILS/DME fuera de servicio y procedimiento IAC RWY 21 suspendido hasta el 30 de diciembre (NOTAM C3216/26 - repetido desde el 7 de enero de 2022).
-2. Andoas: Aerodromo cerrado de forma permanente (NOTAM C3814/25 - repetido desde el 15 de febrero de 2023).
-3. Chiclayo: Pista 01/19 y calles de rodaje A, B, B1, C, D y D1 cerradas por trabajos de mantenimiento de 23:00 a 04:00 en noches programadas desde mañana hasta el 31 de diciembre (NOTAM A3734/26 y A3735/26).
-4. Cusco: Fase 1 ACDM en vigencia de 06:00 a 18:59 hasta el 5 de diciembre (NOTAM C2961/26).
-5. Lima ACC: Entrada de aeronaves monomotor restringida dentro del TMA Lima en radio de 30NM respecto al VOR JCL hasta el 30 de noviembre de 09:30 a 11:30, 16:00 a 18:00 y 20:00 a 00:00, excepto para VFR dentro de zonas militares SPR68 y SPR68A o a 2000FT o inferior fuera de trayectorias y rutas instrumentales (NOTAM A2864/26 - repetido desde el 21 de diciembre de 2025).
-6. Lima aeropuerto: Frecuencia de emergencia 121.5 MHz con cobertura limitada, disponible unicamente dentro de cada TMA hasta el 12 de febrero de 2027 (NOTAM A3647/26 - repetido desde el 18 de enero de 2023).
-7. Lima aeropuerto: Precaucion por obras de Linea 2 con gruas y perforadoras de 28m a 600m de extremo de pista 16R; aeronaves en salida deberan mantener gradiente de ascenso minimo de 4.7% hasta el 11 de diciembre a las 17:00 (NOTAM A2978/26).
-8. Lima aeropuerto: Festival aerodeportivo en zona restringida SPR91 de 10:00 a 18:00 desde superficie hasta 2000FT AMSL hasta el 22 de noviembre; contactar a Las Palmas Torre para informacion de transito (NOTAM A3731/26).
-9. Lima aeropuerto: Zona temporalmente segregada por paracaidismo sobre aerodromo Las Palmas de 12:30 a 14:30 y de 16:00 a 17:30 hasta el 22 de noviembre desde superficie hasta 8000FT AMSL (NOTAM A3705/26).
-10. Lima aeropuerto: Zona temporalmente segregada por ejercicios de tiro en Salinas Huacho (entre 3.1NM y 6.6NM y radiales 297 a 335 de VOR SLS, desde superficie hasta 6000FT AGL) el 25 de noviembre de 10:00 a 15:00; requiere coordinacion previa con Lima ACC (NOTAM A3732/26).
-11. Pucallpa: Pista 02/20 y calles de rodaje A y B cerradas por trabajos de mantenimiento de 23:30 a 05:00 hasta el 31 de diciembre (NOTAM A3663/26 y A3665/26 - repetido desde el 1 de septiembre de 2026).
-12. Puerto Maldonado: Procedimientos de llegada instrumental IAC VOR/DME - ILS/DME pista 01 (descensos Alfa, Bravo, Charlie y Delta) suspendidos de manera permanente (NOTAM C3069/26 - repetido desde el 12 de marzo de 2025).
-13. Tarapoto: Torre de Control sin visibilidad en los primeros 700m del lado izquierdo de pista 17 por maleza y arboles crecidos hasta el 2 de diciembre a las 12:00 (NOTAM C3698/26 - repetido desde el 1 de octubre de 2026).
-"""
+""" + "\n".join(comp_lines) + "\n"
     txt_filename = f"{yymmdd} REPORTE NOTAMS WHATSAPP.txt"
     local_txt = os.path.join(LOCAL_OUT_DIR, txt_filename)
     drive_txt = os.path.join(DRIVE_OUT_DIR, txt_filename)
