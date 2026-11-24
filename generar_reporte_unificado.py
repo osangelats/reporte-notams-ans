@@ -318,14 +318,46 @@ def extract_replaced_notam(icao_msg):
     return m.group(1) if m else None
 
 
+def is_excluded_non_ans(e_txt, icao, indicadores):
+    """Filtros estrictos de exclusión (Costa Verde, SEI/RFFS, stands/TXL, horarios AIP, RPAS, globos, HLP, etc.)."""
+    u = e_txt.upper()
+    if any(k in u for k in ("HR SER", "SER HR", "AVBL O/R", "OPR HR", "AD HR", "ATS HR", "TWR HR")):
+        return True
+    if any(k in u for k in ("COSTA VERDE", "PARAPENTE", "PARATRIKE", "PARAMOTOR", "ALA DELTA", "AERODEPORTIVA")):
+        return True
+    if any(k in u for k in ("RFFS", "FIRE FIGHTING", "RESCUE AND FIRE", "SEI ")) and not re.search(r"\b(RWY|TWY|ILS|VOR|DME|ATS|TWR)\b", u):
+        return True
+    if any(k in u for k in ("ACFT STAND", "PARKING STAND", "PEA ", "STANDS ", "TXL ")):
+        return True
+    if any(k in u for k in ("CHECKLIST", "TRIGGER NOTAM", "AIP AMDT", "REF AIP", "WEF ", "SUP AIP", "HTTPS://")) and "A-CDM" not in u and "ACDM" not in u:
+        return True
+    if any(k in u for k in ("RPAS", "DRONE", "PROBE BALLOON", "GRASS CUTTING", "VIRAJE LENTO", "REF RD ", "PCN ")):
+        return True
+    if u.startswith("HLP ") or "HELIPUERTO" in u:
+        return True
+    if u.startswith("OBST ") and not re.search(r"\b(RWY|GRADIENT)\b", u):
+        return True
+    if ("AD CLSD" in u or "AD CERRADO" in u) and icao not in INTL_ICAOS and icao not in LIMA_ICAOS and icao not in CUSCO_ICAOS:
+        _, distintivo = indicadores.get(icao, ("", ""))
+        if not distintivo:
+            return True
+    if icao == "SPLP" and not re.search(r"\b(AD CLSD|RWY)\b", u):
+        return True
+    return False
+
+
 def is_movement_area_spjc_spzo(icao, msg_e):
+    """Solo verdadero si refiere estrictamente a pistas (RWY), calles de rodaje (TWY) o transferencias (GATE TRANSFER) en SPJC/SPZO."""
     if icao not in ("SPJC", "SPZO"):
         return False
     u = msg_e.upper()
-    # Excluir L2 / obstaculos en trayectoria, TSA, SPR91, 121.5, A-CDM y TXL/stands de plataforma
-    if any(k in u for k in ("121.5", "LINEA 2", "CLIMB GRADIENT", "GRADIENTE", "SPR91", "AIR DISPLAY", "PARACHUTE", "TSA ", "GUN FIRING", "A-CDM", "TXL ", "ACFT STAND")):
+    if any(k in u for k in (
+        "121.5", "LINEA 2", "CLIMB GRADIENT", "GRADIENTE", "SPR91", "AIR DISPLAY",
+        "PARACHUTE", "TSA ", "GUN FIRING", "GUN-FIRING", "A-CDM", "ACDM", "GNSS",
+        "TXL ", "ACFT STAND", "AERODEPORTIVA", "PARAPENTE", "COSTA VERDE"
+    )):
         return False
-    return any(k in u for k in ("RWY", "TWY", "HOLDING", "TURN", "180 DEG", "TORA", "TODA", "ASDA", "LDA", "STRIP", "MARKING", "PAVEMENT", "CROSSING", "SEGREGATED"))
+    return bool(re.search(r"\b(RWY|TWY|GATE\s+TRANSFER|TORA|ASDA|LDA)\b", u))
 
 
 def is_spjc_night_notam(n_obj):
@@ -351,44 +383,15 @@ def is_ans_reportable(n_obj, indicadores):
     msg = str(n_obj.get("icaoMessage", "")).upper()
     e_txt = extract_item_e(msg).upper()
 
-    # Regla 3: horarios de servicio AIP
-    if any(k in e_txt for k in ("HR SER", "SER HR", "AVBL O/R", "OPR HR", "AD HR", "ATS HR", "TWR HR")):
-        return False
-    # Regla 9: Costa Verde aerodeportiva
-    if any(k in e_txt for k in ("COSTA VERDE", "PARAPENTE", "PARATRIKE", "AERODEPORTIVA")):
-        return False
-    # Regla 12: SEI / RFFS salvo afectacion directa ANS
-    if any(k in e_txt for k in ("RFFS", "FIRE FIGHTING", "RESCUE AND FIRE", "SEI ")) and not any(k in e_txt for k in ("RWY", "TWY", "ILS", "VOR", "DME", "ATS", "TWR")):
-        return False
-    # Regla 13: Puestos de estacionamiento (PEA / ACFT STAND)
-    if any(k in e_txt for k in ("ACFT STAND", "PARKING STAND", "PEA ", "STANDS ")) and "TXL" not in e_txt:
-        return False
-    # Ruido administrativo / publicaciones / RPAS / globos / HLP / grass cutting
-    if any(k in e_txt for k in ("CHECKLIST", "TRIGGER NOTAM", "AIP AMDT", "REF AIP", "WEF ", "SUP AIP")) and "A-CDM" not in e_txt:
-        return False
-    if any(k in e_txt for k in ("RPAS", "DRONE", "PROBE BALLOON", "GRASS CUTTING", "VIRAJE LENTO", "REF RD ", "PCN ")):
-        return False
-    if e_txt.startswith("HLP ") or "HELIPUERTO" in e_txt:
-        return False
-    # Obstaculos menores fuera de pista/gradiente (ej. gruas urbanas lejos del AD)
-    if e_txt.startswith("OBST ") and "RWY" not in e_txt and "GRADIENT" not in e_txt:
-        return False
-    # Regla 4: Aerodromos cerrados solo si tienen distintivo de llamada en CTNAV
-    if ("AD CLSD" in e_txt or "AD CERRADO" in e_txt) and icao not in INTL_ICAOS and icao not in LIMA_ICAOS and icao not in CUSCO_ICAOS:
-        _, distintivo = indicadores.get(icao, ("", ""))
-        if not distintivo:
-            return False
-    # SPLP solo si es relevante; SPR91/paracaidismo de Lima ya salen por SPJC/SPIM
-    if icao == "SPLP" and not any(k in e_txt for k in ("AD CLSD", "RWY")):
+    if is_excluded_non_ans(e_txt, icao, indicadores):
         return False
 
-    # Solo incluir NOTAMs publicados recientemente (>= 2026-11-20 18:00) o con patron operacional ANS clave
+    # Solo incluir NOTAMs publicados recientemente (>= 2026-11-20 18:00) y con patron operacional ANS clave
     iss_str = str(n_obj.get("issueDate", "")).strip()
     is_recent = iss_str >= "2026-11-20 18:00:00"
-    is_core_ans = any(k in e_txt for k in (
-        "RWY", "TWY", "ILS", "VOR", "DME", "GNSS", "APAPI", "PAPI", "BIRD HAZARD",
-        "VENTEO DE GAS", "TSA ", "PARACHUTE", "AIR DISPLAY", "GUN FIRING",
-        "IAC ", "SID ", "STAR ", "GRADIENT", "AD CLSD"
+    is_core_ans = bool(re.search(
+        r"\b(RWY|TWY|ILS|VOR|DME|GNSS|APAPI|PAPI|BIRD HAZARD|VENTEO DE GAS|TSA|PARACHUTE|AIR DISPLAY|GUN FIRING|GUN-FIRING|IAC|SID|STAR|GRADIENT|AD CLSD)\b",
+        e_txt,
     ))
     return is_recent and is_core_ans
 
@@ -1006,6 +1009,9 @@ def build_unified_report():
             continue
         icao = str(n_obj.get("facilityDesignator", "")).strip().upper()
         msg_e = extract_item_e(n_obj.get("icaoMessage", ""))
+        # Primero aplicar SIEMPRE las reglas de exclusión (Costa Verde, stands/TXL, SEI, RPAS, etc.)
+        if is_excluded_non_ans(msg_e, icao, indicadores):
+            continue
         if icao == "SPJC" and is_movement_area_spjc_spzo(icao, msg_e) and is_spjc_night_notam(n_obj):
             panel, title, body, sched, tone, pin_xy = classify_spjc_night_surface(n_obj)
             if panel == "top":
