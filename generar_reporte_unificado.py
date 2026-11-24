@@ -676,10 +676,9 @@ def render_spjc_night_svg(active, bg_uri, top_items=None, bot_items=None):
     top_items = top_items or []
     bot_items = bot_items or []
 
-    def card_x(idx, n_tot):
+    def card_x(idx, cols_per_row):
         col = idx % 5
-        cols_in_row = min(5, n_tot - (idx // 5) * 5)
-        return (col + 0.5) * (1800.0 / max(1, cols_in_row))
+        return (col + 0.5) * (1800.0 / max(1, cols_per_row))
 
     # Trazos longitudinales de pista / franja / calles M y U
     if any("RWY 16R/34L CLSD" in extract_item_e(active[nid]["icaoMessage"]).upper() for nid, *_ in bot_items if nid in active):
@@ -701,17 +700,17 @@ def render_spjc_night_svg(active, bg_uri, top_items=None, bot_items=None):
             '<line x1="840" y1="775" x2="1465" y2="592" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
 
-    # Líneas y pines exactos para cada tarjeta superior activa
+    # Líneas y pines exactos para cada tarjeta superior activa (grid fijo de 5 columnas)
     for idx, (nid, _, _, _, tone, (px, py)) in enumerate(top_items):
-        tx = card_x(idx, len(top_items))
+        tx = card_x(idx, 5 if len(top_items) > 5 else len(top_items))
         col_str = "#d97706" if tone == "amber" else "#c53929"
         overlays.append(f'<line x1="{tx:.1f}" y1="0" x2="{px}" y2="{py}" stroke="{col_str}" stroke-width="1.8" stroke-opacity="0.78"/>')
         if py < 600:
             overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="{col_str}" stroke="#ffffff" stroke-width="2.5"/>')
 
-    # Líneas y pines exactos para cada tarjeta inferior activa
+    # Líneas y pines exactos para cada tarjeta inferior activa (auto-fit en una fila)
     for idx, (nid, _, _, _, tone, (px, py)) in enumerate(bot_items):
-        tx = card_x(idx, len(bot_items))
+        tx = card_x(idx, min(5, len(bot_items)))
         overlays.append(f'<line x1="{tx:.1f}" y1="1200" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.78"/>')
         if py < 950:
             overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>')
@@ -1275,8 +1274,8 @@ def build_unified_report():
   /* Layout Pagina 1: SPJC Dia / Noche */
   .spjc-grid {{
     display: grid;
-    grid-template-columns: 1fr 1.12fr;
-    gap: 10px;
+    grid-template-columns: 1fr 1.04fr;
+    gap: 8px;
   }}
   .panel {{
     border: 1px solid #cbd5e1;
@@ -1305,7 +1304,7 @@ def build_unified_report():
   /* Tarjetas de mapa */
   .cards-row-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px; }}
   .cards-row-6 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-bottom: 2.5px; }}
-  .cards-row-5 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-top: 2.5px; }}
+  .cards-row-5 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 2.5px; margin-top: 2.5px; }}
   .cards-row-3 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-bottom: 8px; }}
   .procs-strip {{
     margin-top: 4px;
@@ -1370,7 +1369,6 @@ def build_unified_report():
   .map-svg {{
     display: block;
     width: 100%;
-    max-height: 295px;
     height: auto;
     margin: 0 auto;
   }}
