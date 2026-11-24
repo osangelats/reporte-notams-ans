@@ -322,10 +322,27 @@ def is_movement_area_spjc_spzo(icao, msg_e):
     if icao not in ("SPJC", "SPZO"):
         return False
     u = msg_e.upper()
-    # Excluir L2 / obstaculos en trayectoria, TSA, SPR91, 121.5, A-CDM
-    if any(k in u for k in ("121.5", "LINEA 2", "CLIMB GRADIENT", "GRADIENTE", "SPR91", "AIR DISPLAY", "PARACHUTE", "TSA ", "GUN FIRING", "A-CDM")):
+    # Excluir L2 / obstaculos en trayectoria, TSA, SPR91, 121.5, A-CDM y TXL/stands de plataforma
+    if any(k in u for k in ("121.5", "LINEA 2", "CLIMB GRADIENT", "GRADIENTE", "SPR91", "AIR DISPLAY", "PARACHUTE", "TSA ", "GUN FIRING", "A-CDM", "TXL ", "ACFT STAND")):
         return False
-    return any(k in u for k in ("RWY", "TWY", "TXL", "HOLDING", "TURN", "180 DEG", "TORA", "TODA", "ASDA", "LDA", "STRIP", "MARKING", "PAVEMENT", "CROSSING", "SEGREGATED"))
+    return any(k in u for k in ("RWY", "TWY", "HOLDING", "TURN", "180 DEG", "TORA", "TODA", "ASDA", "LDA", "STRIP", "MARKING", "PAVEMENT", "CROSSING", "SEGREGATED"))
+
+
+def is_spjc_night_notam(n_obj):
+    """Determina si un NOTAM de SPJC aplica en bloque NOCHE (19:00-07:00 hora local)."""
+    d_raw = extract_item_d(n_obj.get("icaoMessage", "")).upper()
+    hm = re.search(r"(\d{4})\s*-\s*(\d{4})", d_raw)
+    if hm:
+        lh = (int(hm.group(1)[:2]) - 5) % 24
+        return lh >= 19 or lh < 7
+    st = parse_utc(n_obj.get("startDate"))
+    en = parse_utc(n_obj.get("endDate"))
+    if st and en:
+        dur_h = (en - st).total_seconds() / 3600.0
+        if dur_h <= 12:
+            lh = st.astimezone(LIMA_TZ).hour
+            return lh >= 19 or lh < 7
+    return False
 
 
 def is_ans_reportable(n_obj, indicadores):
@@ -423,41 +440,67 @@ def format_d_schedule_local(d_str, start_utc_str):
     return hora_txt or fechas_txt
 
 
+ACRONYM_TOKENS = [
+    "A-CDM", "APAPI", "PAPI", "DME", "VOR", "ILS", "NDB", "GNSS",
+    "TWR", "TWY", "RWY", "ACFT", "TSA", "ATC", "FPL", "TMA", "ACC",
+    "AIP", "SUP", "IAC", "SID", "STAR", "VFR", "IFR", "AMSL", "AGL",
+    "TORA", "TODA", "ASDA", "LDA", "CAT", "GND", "NOTAM", "UTC",
+    "NM", "FT", "MHz", "U/S", "AD",
+]
+
+
+def preserve_acronyms(txt):
+    """Mantiene en MAYÚSCULAS todos los acrónimos aeronáuticos y canales (ej. CH 90X)."""
+    for acr in ACRONYM_TOKENS:
+        txt = re.sub(rf"(?<![A-Za-z0-9]){re.escape(acr)}(?![A-Za-z0-9])", acr, txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bch\s*([0-9]+[xy])\b", lambda m: f"CH {m.group(1).upper()}", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bmhz\b", "MHz", txt, flags=re.IGNORECASE)
+    return txt
+
+
 def translate_icao_to_spanish(n_obj):
-    """Traduce automáticamente un NOTAM nuevo de OACI (E + D) a español claro para la tabla y WhatsApp."""
+    """Traduce automáticamente un NOTAM nuevo de OACI (E + D) a español claro con acrónimos en mayúsculas."""
     e_raw = extract_item_e(n_obj.get("icaoMessage", ""))
     d_raw = extract_item_d(n_obj.get("icaoMessage", ""))
     sched = format_d_schedule_local(d_raw, n_obj.get("startDate", ""))
     u = e_raw.upper()
 
-    # Patrones frecuentes CTNAV
     m_rwy = re.match(r"RWY\s+([0-9/LRC]+)\s+CLSD(?:\s+DUE\s+TO\s+WIP)?", u)
     if m_rwy:
-        base = f"Pista {m_rwy.group(1)} cerrada por trabajos de mantenimiento" if "WIP" in u else f"Pista {m_rwy.group(1)} cerrada"
-        return f"{base} {sched}.".strip() if sched else f"{base}."
+        base = f"RWY {m_rwy.group(1)} cerrada por trabajos de mantenimiento" if "WIP" in u else f"RWY {m_rwy.group(1)} cerrada"
+        return preserve_acronyms(f"{base} {sched}.".strip() if sched else f"{base}.")
 
-    m_twy = re.match(r"TWY\s+([A-Z0-9,\s/]+?)\s+CLSD(?:\s+DUE\s+TO\s+WIP)?", u)
+    m_twy = re.match(r"(?:TWY|GATE\s+TRANSFER)\s+([A-Z0-9,\s/\-]+?)\s+CLSD(?:\s+DUE\s+TO\s+WIP)?", u)
     if m_twy:
-        base = f"Calles de rodaje {m_twy.group(1).strip()} cerradas por trabajos de mantenimiento" if "WIP" in u else f"Calles de rodaje {m_twy.group(1).strip()} cerradas"
-        return f"{base} {sched}.".strip() if sched else f"{base}."
+        seg = m_twy.group(1).strip().replace(" BTN ", " entre ").replace(" TO ", " y ")
+        base = f"TWY {seg} cerrada por trabajos de mantenimiento" if "WIP" in u else f"TWY {seg} cerrada"
+        return preserve_acronyms(f"{base} {sched}.".strip() if sched else f"{base}.")
+
+    m_navaid = re.match(r"(DME|VOR|ILS|ILS/DME|VOR/DME)\s*(?:AND\s+)?(CH\s*\d+[XY])?\s*U/S", u)
+    if m_navaid:
+        ch = f" ({m_navaid.group(2).strip()})" if m_navaid.group(2) else ""
+        return preserve_acronyms(f"{m_navaid.group(1)}{ch} fuera de servicio.")
 
     m_apapi = re.match(r"(PAPI|APAPI)\s+RWY\s+([0-9/LRC]+)\s+INOP", u)
     if m_apapi:
-        return f"{m_apapi.group(1)} de pista {m_apapi.group(2)} inoperativo."
+        return preserve_acronyms(f"{m_apapi.group(1)} de RWY {m_apapi.group(2)} inoperativo.")
 
     m_bird = re.match(r"BIRD\s+HAZARD\s+RWY\s+([0-9/LRC]+)", u)
     if m_bird:
-        return f"Peligro de aves en pista {m_bird.group(1)}."
+        return preserve_acronyms(f"Peligro de aves en RWY {m_bird.group(1)}.")
 
     if "AD CLSD" in u:
-        return "Aeródromo cerrado de forma permanente." if str(n_obj.get("endDate", "")).upper() == "PERM" else "Aeródromo cerrado."
+        return "AD cerrado de forma permanente." if str(n_obj.get("endDate", "")).upper() == "PERM" else "AD cerrado."
 
-    # Si ya viene en español (ej. VENTEO DE GAS), limpiar coordenadas largas y convertir horario si aplica
     txt = e_raw
     txt = re.sub(r"\s*COORD:.*$", "", txt, flags=re.IGNORECASE).strip()
     txt = re.sub(r"\s*F\)G.*$", "", txt, flags=re.IGNORECASE).strip()
+    txt = re.sub(r"\bTORRE\b", "TWR", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bAERODROMO\b|\bAERÓDROMO\b", "AD", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bAERONAVES\b", "ACFT", txt, flags=re.IGNORECASE)
     if txt.isupper():
         txt = txt.capitalize()
+    txt = preserve_acronyms(txt)
     if sched and sched not in txt:
         txt = f"{txt.rstrip('.')} ({sched})."
     elif not txt.endswith("."):
@@ -550,13 +593,6 @@ def render_spjc_day_svg(active, bg_uri):
             '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="6" stroke-dasharray="18,10"/>'
             '<line x1="510" y1="0" x2="620" y2="415" stroke="#c53929" stroke-width="2.2"/>'
         )
-    # A3513/26: TXL T BLUE limitada entre 601 y 202 (07:00-15:00 local)
-    if "A3513/26" in active:
-        overlays.append(
-            '<circle cx="1162" cy="672" r="14" fill="#d97706" stroke="#ffffff" stroke-width="3.5"/>'
-            '<circle cx="1162" cy="672" r="24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-dasharray="6,4"/>'
-            '<line x1="1270" y1="0" x2="1166" y2="652" stroke="#b45309" stroke-width="2.0"/>'
-        )
     # A2863/26: TWY L entre L5 y L7 no disp. CAT D/E
     if "A2863/26" in active:
         overlays.append(
@@ -592,8 +628,8 @@ def render_spjc_night_svg(active, bg_uri):
             '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
             '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
         )
-    # TWY M (A3722/26) & M1-M4 (A3723, A3721, A3720, A3719)
-    if "A3722/26" in active or "A3723/26" in active:
+    # TWY M (A3722, A3723, A3721, A3720, A3719, A3764, A3766, A3765, A3769)
+    if any(k in active for k in ("A3722/26", "A3723/26", "A3764/26", "A3766/26", "A3765/26", "A3769/26")):
         overlays.append(
             '<line x1="822" y1="472" x2="1445" y2="288" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
@@ -603,6 +639,10 @@ def render_spjc_night_svg(active, bg_uri):
         ("A3721/26", 1142, 372, 760, 0),
         ("A3720/26", 1255, 338, 1060, 0),
         ("A3719/26", 1412, 292, 1640, 0),
+        ("A3764/26", 910, 444, 300, 0),
+        ("A3766/26", 1055, 400, 620, 0),
+        ("A3765/26", 1200, 355, 920, 0),
+        ("A3769/26", 1335, 315, 1480, 0),
     ]
     for nid, px, py, tx, ty in m_pins:
         if nid in active:
@@ -613,15 +653,17 @@ def render_spjc_night_svg(active, bg_uri):
     if "A3695/26" in active:
         overlays.append('<line x1="1350" y1="0" x2="1220" y2="758" stroke="#d97706" stroke-width="1.8" stroke-opacity="0.75"/>')
 
-    # TWY U / U1 / U2 / U3 / V3 / V5 (A3725, A3718, A3717, A3729)
-    if "A3725/26" in active or "A3729/26" in active:
+    # TWY U / U1 / U2 / U3 / V3 / V5 (A3725, A3718, A3717, A3729, A3763, A3762)
+    if any(k in active for k in ("A3725/26", "A3729/26", "A3763/26", "A3762/26")):
         overlays.append(
             '<line x1="840" y1="775" x2="1465" y2="592" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
     u_pins = [
         ("A3725/26", 1058, 725, 540, 1200),
         ("A3718/26", 1235, 675, 900, 1200),
+        ("A3763/26", 1235, 675, 900, 1200),
         ("A3717/26", 1365, 636, 1260, 1200),
+        ("A3762/26", 1365, 636, 1260, 1200),
         ("A3729/26", 1435, 616, 1620, 1200),
     ]
     for nid, px, py, tx, ty in u_pins:
@@ -744,7 +786,7 @@ def build_unified_report():
             "LIMA",
             "LIMA ACC",
             "A2864/26",
-            "Entrada de aeronaves monomotor restringida dentro del TMA Lima en radio de 30 NM respecto al VOR JCL de 09:30 a 11:30, 16:00 a 18:00 y 20:00 a 00:00, excepto para VFR dentro de zonas militares SPR68 y SPR68A o a 2000 FT o inferior fuera de trayectorias y rutas instrumentales.",
+            "Entrada de ACFT monomotor restringida dentro del TMA Lima en radio de 30 NM respecto al VOR JCL de 09:30 a 11:30, 16:00 a 18:00 y 20:00 a 00:00, excepto para VFR dentro de zonas militares SPR68 y SPR68A o a 2000 FT o inferior fuera de trayectorias y rutas instrumentales.",
             "",
             "A4017/25",
             date(2025, 12, 21),
@@ -762,7 +804,7 @@ def build_unified_report():
             "LIMA",
             "LIMA AEROPUERTO",
             "A2978/26",
-            "Precaución por obras de Línea 2 del Metro de Lima con grúas y perforadoras de 28 m de altura a 600 m del extremo de pista 16R; aeronaves en salida deberán mantener gradiente de ascenso mínimo de 4.7%.",
+            "Precaución por obras de Línea 2 del Metro de Lima con grúas y perforadoras de 28 m de altura a 600 m del extremo de RWY 16R; ACFT en salida deberán mantener gradiente de ascenso mínimo de 4.7%.",
             "",
             "A2179/26",
             date(2026, 9, 11),
@@ -771,7 +813,7 @@ def build_unified_report():
             "LIMA",
             "LIMA AEROPUERTO",
             "A3731/26",
-            "Festival aerodeportivo en zona restringida SPR91 de 10:00 a 18:00 desde superficie hasta 2000 FT AMSL (operaciones de aeronaves, helicópteros y RPAS). Contactar a Las Palmas Torre para información de tránsito.",
+            "Festival aerodeportivo en zona restringida SPR91 de 10:00 a 18:00 desde superficie hasta 2000 FT AMSL (operaciones de ACFT, helicópteros y RPAS). Contactar a Las Palmas TWR para información de tránsito.",
             "Relacionado con C3916/26 (SPLP), A3730/26 (cierre RWY 16L/34R en plano) y A3705/26 (TSA Las Palmas).",
             "A3703/26",
             date(2026, 11, 17),
@@ -780,7 +822,7 @@ def build_unified_report():
             "LIMA",
             "LIMA AEROPUERTO",
             "A3705/26",
-            "Zona temporalmente segregada (TSA) por lanzamiento de paracaidistas sobre aeródromo Las Palmas de 12:30 a 14:30 y de 16:00 a 17:30 desde superficie hasta 8000 FT AMSL. Requiere coordinación previa con Lima ACC.",
+            "Área temporalmente segregada (TSA) por lanzamiento de paracaidistas sobre AD Las Palmas de 12:30 a 14:30 y de 16:00 a 17:30 desde superficie hasta 8000 FT AMSL. Requiere coordinación previa con Lima ACC.",
             "Relacionado con C3889/26 (SPLP), A3730/26 (cierre RWY 16L/34R en plano) y A3731/26 (festival SPR91).",
             "A3705/26",
             date(2026, 11, 17),
@@ -789,7 +831,7 @@ def build_unified_report():
             "LIMA",
             "LIMA AEROPUERTO",
             "A3732/26",
-            "Zona temporalmente segregada (TSA) por ejercicios de tiro en zona Salinas Huacho (entre 3.1 NM y 6.6 NM, radiales 297 a 335 del VOR SLS, desde superficie hasta 6000 FT AGL). Requiere coordinación previa con Lima ACC.",
+            "Área temporalmente segregada (TSA) por ejercicios de tiro en zona Salinas Huacho (entre 3.1 NM y 6.6 NM, radiales 297 a 335 del VOR SLS, desde superficie hasta 6000 FT AGL). Requiere coordinación previa con Lima ACC.",
             "Programación posterior al ejercicio A3642/26 del 20/11.",
             "A3732/26",
             date(2026, 11, 19),
@@ -810,7 +852,7 @@ def build_unified_report():
             "CHICLAYO",
             "A3745/26",
             translate_icao_to_spanish(active["A3745/26"]) if "A3745/26" in active else "",
-            "Asociado a A3748/26 (cierre simultáneo de calles de rodaje).",
+            "Asociado a A3748/26 (cierre simultáneo de TWY).",
             "A3745/26",
             date(2026, 11, 21),
         ),
@@ -818,8 +860,8 @@ def build_unified_report():
             "AEROPUERTOS INTERNACIONALES",
             "CHICLAYO",
             "A3748/26",
-            "Calles de rodaje A, B, B1, C, D y D1 cerradas por trabajos de mantenimiento de 23:00 a 04:00 en las mismas noches programadas del cierre de pista.",
-            "Asociado a A3745/26 (cierre simultáneo de pista 01/19).",
+            "TWY A, B, B1, C, D y D1 cerradas por trabajos de mantenimiento de 23:00 a 04:00 en las mismas noches programadas del cierre de RWY.",
+            "Asociado a A3745/26 (cierre simultáneo de RWY 01/19).",
             "A3748/26",
             date(2026, 11, 21),
         ),
@@ -827,8 +869,8 @@ def build_unified_report():
             "AEROPUERTOS INTERNACIONALES",
             "PUCALLPA",
             "A3663/26",
-            "Pista 02/20 cerrada por trabajos de mantenimiento en horario diario de 23:30 a 05:00.",
-            "Asociado a A3665/26 (cierre simultáneo de calles de rodaje A y B).",
+            "RWY 02/20 cerrada por trabajos de mantenimiento en horario diario de 23:30 a 05:00.",
+            "Asociado a A3665/26 (cierre simultáneo de TWY A y B).",
             "A2840/26",
             date(2026, 9, 1),
         ),
@@ -836,8 +878,8 @@ def build_unified_report():
             "AEROPUERTOS INTERNACIONALES",
             "PUCALLPA",
             "A3665/26",
-            "Calles de rodaje A y B cerradas por trabajos de mantenimiento en horario diario de 23:30 a 05:00.",
-            "Asociado a A3663/26 (cierre simultáneo de pista 02/20).",
+            "TWY A y B cerradas por trabajos de mantenimiento en horario diario de 23:30 a 05:00.",
+            "Asociado a A3663/26 (cierre simultáneo de RWY 02/20).",
             "A2839/26",
             date(2026, 9, 1),
         ),
@@ -845,7 +887,7 @@ def build_unified_report():
             "AEROPUERTOS INTERNACIONALES",
             "PUERTO MALDONADO",
             "C3069/26",
-            "Procedimientos de llegada instrumental IAC VOR/DME - ILS/DME pista 01 (descensos Alfa, Bravo, Charlie y Delta) suspendidos de manera permanente por razones operacionales.",
+            "Procedimientos de llegada instrumental IAC VOR/DME - ILS/DME RWY 01 (descensos Alfa, Bravo, Charlie y Delta) suspendidos de manera permanente por razones operacionales.",
             "",
             "C0978/25",
             date(2025, 3, 12),
@@ -855,7 +897,7 @@ def build_unified_report():
             "AEROPUERTOS NACIONALES",
             "TARAPOTO",
             "C3698/26",
-            "Torre de Control sin visibilidad en los primeros 700 m del lado izquierdo de la pista 17 debido a maleza y árboles crecidos.",
+            "TWR sin visibilidad en los primeros 700 m del lado izquierdo de la RWY 17 debido a maleza y árboles crecidos.",
             "",
             "C3251/26",
             date(2026, 10, 1),
@@ -864,7 +906,7 @@ def build_unified_report():
             "AEROPUERTOS NACIONALES",
             "ANDOAS",
             "C3814/25",
-            "Aeródromo cerrado de forma permanente.",
+            "AD cerrado de forma permanente.",
             "",
             "C0649/23",
             date(2023, 2, 15),
@@ -909,12 +951,15 @@ def build_unified_report():
 
     # Descubrimiento automático en vivo de cualquier NOTAM ANS nuevo publicado hoy o en adelante
     pre_mapped_planos = {
-        "A3730/26", "A3513/26", "A3723/26", "A3722/26", "A3721/26", "A3720/26",
+        "A3730/26", "A3723/26", "A3722/26", "A3721/26", "A3720/26",
         "A3695/26", "A3719/26", "A3696/26", "A3725/26", "A3718/26", "A3717/26",
         "A3729/26", "A3523/26", "A2828/26", "A2830/26", "A2827/26", "A3424/26",
         "A3341/26", "A3527/26", "A2863/26", "A3740/26", "A3707/26", "A3711/26",
+        "A3762/26", "A3763/26", "A3764/26", "A3765/26", "A3766/26", "A3769/26",
     }
-    extra_spjc_cards = []
+    extra_spjc_day = []
+    extra_spjc_night_top = []
+    extra_spjc_night_bot = []
     extra_spzo_cards = []
     for nid, n_obj in sorted(active.items(), key=lambda x: (str(x[1].get("facilityDesignator", "")), x[0])):
         if nid in known_ids or nid in pre_mapped_planos:
@@ -926,7 +971,13 @@ def build_unified_report():
         if is_movement_area_spjc_spzo(icao, msg_e):
             sched = f"Vig: {fmt_local_short(n_obj.get('startDate'))} - {fmt_local_short(n_obj.get('endDate'))} LOCAL"
             if icao == "SPJC":
-                extra_spjc_cards.append((nid, "SPJC Nuevo", translate_icao_to_spanish(n_obj), sched, "red"))
+                if is_spjc_night_notam(n_obj):
+                    if any(k in msg_e.upper() for k in ("TWY U", "U1", "U2", "U3", "TWY V", "16R/34L")):
+                        extra_spjc_night_bot.append((nid, "SPJC Noche", translate_icao_to_spanish(n_obj), sched, "red"))
+                    else:
+                        extra_spjc_night_top.append((nid, "SPJC Noche", translate_icao_to_spanish(n_obj), sched, "red"))
+                else:
+                    extra_spjc_day.append((nid, "SPJC Día", translate_icao_to_spanish(n_obj), sched, "red"))
             else:
                 extra_spzo_cards.append((nid, "SPZO Nuevo", translate_icao_to_spanish(n_obj), sched, "red"))
             continue
@@ -968,46 +1019,51 @@ def build_unified_report():
     # CONSTRUCCION DE TARJETAS PARA PAGINA 1 (LIMA SPJC) Y PAGINA 2 (CUSCO SPZO)
     # =========================================================================
     spjc_day_cards_spec = [
-        ("A3730/26", "RWY 16L/34R", "No disponible para aterrizajes ni despegues. RWY 16R/34L en uso. Salidas por 16R con ascenso en rumbo de pista y viraje a la derecha directo a JC921.", "Vig: 19/11 18:20 - 22/11 17:30 · Cierre: 12:30-14:30 y 16:00-17:30 LOCAL", "red"),
-        ("A3513/26", "TXL T BLUE", "Rodaje limitado entre puestos 601 y 202 por obras. Precaución en rodaje (punto de referencia del sector).", "Vig: 03/11 07:00 - 13/12 15:00 · Horario: 07:00-15:00 LOCAL", "amber"),
+        ("A3730/26", "RWY 16L/34R", "No disponible para aterrizajes ni despegues. RWY 16R/34L en uso. Salidas por 16R con ascenso en rumbo de RWY y viraje a la derecha directo a JC921.", "Vig: 19/11 18:20 - 22/11 17:30 · Cierre: 12:30-14:30 y 16:00-17:30 LOCAL", "red"),
     ]
     spjc_day_cards_html = []
-    for nid, title, body, sched, tone in spjc_day_cards_spec + extra_spjc_cards:
+    for nid, title, body, sched, tone in spjc_day_cards_spec + extra_spjc_day:
         if nid in active:
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_day_cards_html.append(card_link(nid, title, body, sched, tone, badge))
 
     spjc_night_top_spec = [
+        ("A3764/26", "TWY M (R-M1)", "TWY M cerrada entre R y M1 por obras. Prever demoras.", "28/11 · 01:30-04:30", "red"),
+        ("A3766/26", "TWY M (M1-M2)", "TWY M cerrada entre M1 y M2 por obras. Prever demoras.", "29/11 · 01:30-04:30", "red"),
+        ("A3765/26", "TWY M (M2-M3)", "TWY M cerrada entre M2 y M3 por obras. Prever demoras.", "30/11 · 01:30-04:30", "red"),
+        ("A3769/26", "TWY M (M3-M4)", "TWY M cerrada entre M3 y M4 por obras. Prever demoras.", "01/12 · 01:30-04:30", "red"),
         ("A3723/26", "TWY M y M1", "M entre R y M1, y M1 cerradas por obras. Prever demoras.", "02/12 - 03/12 · 01:30-04:30", "red"),
         ("A3722/26", "TWY M", "Cerrada por obras. Transferencias M1, M2, M3 y M4 disponibles.", "28/11 - 01/12 · 01:30-04:30", "red"),
         ("A3721/26", "Transf. M2", "Cerrada por obras. Prever demoras.", "04/12 - 10/12 · 01:30-04:30", "red"),
         ("A3720/26", "Transf. M3", "Cerrada por obras. Prever demoras.", "11/12 - 12/12 · 01:30-04:30", "red"),
-        ("A3695/26", "Franja 16R/34L", "Obras en la franja de pista (referencia general).", "18/11 - 28/11 · 01:30-04:30", "amber"),
+        ("A3695/26", "Franja 16R/34L", "Obras en la franja de RWY (referencia general).", "18/11 - 28/11 · 01:30-04:30", "amber"),
         ("A3719/26", "Transf. M4", "Cerrada por obras. Prever demoras.", "13/12 - 14/12 · 01:30-04:30", "red"),
     ]
     spjc_night_bot_spec = [
-        ("A3696/26", "RWY 16R/34L", "Pista cerrada por trabajos de mantenimiento.", "18/11 - 28/11 · 01:30-04:30", "red"),
+        ("A3696/26", "RWY 16R/34L", "RWY cerrada por trabajos de mantenimiento.", "18/11 - 28/11 · 01:30-04:30", "red"),
         ("A3725/26", "U / U1 / V5", "U entre Q y U1 cerrada. U1 no disp. V5 cerrada.", "22/11 - 23/11 · 01:30-04:30", "red"),
+        ("A3763/26", "Transf. U2", "Cerrada por obras. TWY V disponible.", "24/11 - 25/11 · 01:30-04:30", "red"),
+        ("A3762/26", "Transf. U3", "Cerrada por obras. TWY V disponible.", "26/11 - 27/11 · 01:30-04:30", "red"),
         ("A3718/26", "Transf. U2", "Cerrada por trabajos de mantenimiento.", "24/11 - 25/11 · 01:30-04:30", "red"),
         ("A3717/26", "Transf. U3", "Cerrada por trabajos de mantenimiento.", "26/11 - 27/11 · 01:30-04:30", "red"),
         ("A3729/26", "U y V3", "U entre U3 y puesto 212, y V3 cerradas. U2/U3 disp.", "21/11 · 01:30-04:30", "red"),
     ]
     spjc_night_top_html = []
-    for nid, title, body, sched, tone in spjc_night_top_spec:
+    for nid, title, body, sched, tone in spjc_night_top_spec + extra_spjc_night_top:
         if nid in active:
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_night_top_html.append(card_link(nid, title, body, sched, tone, badge))
 
     spjc_night_bot_html = []
-    for nid, title, body, sched, tone in spjc_night_bot_spec:
+    for nid, title, body, sched, tone in spjc_night_bot_spec + extra_spjc_night_bot:
         if nid in active:
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_night_bot_html.append(card_link(nid, title, body, sched, tone, badge))
 
     # Procedimientos en superficie SPJC (strip inferior unificado)
     spjc_procs_spec = [
-        ("A3523/26", "P1 · TWY L", "Espera 16L en TWY L (L1 no es punto de espera). No cruzar sin autorización ATC.", "Hasta 31/01/27 18:59", "blue"),
-        ("A2828/26", "P2 · L5 y D (Bidirec.)", "Pista 16L/34R en uso bidireccional: esperar antes de CAT I y reportar pista libre.", "06:00-18:00 · Hasta 26/11", "blue"),
+        ("A3523/26", "P1 · TWY L", "Espera 16L en TWY L (L1 no es punto de espera). No cruzar sin autorización ATC.", "Todo el día · Hasta 31/01/27", "blue"),
+        ("A2828/26", "P2 · L5 y D (Bidirec.)", "RWY 16L/34R en uso bidireccional: esperar antes de CAT I y reportar RWY libre.", "06:00-18:00 · Hasta 26/11", "blue"),
         ("A2830/26", "P2 · L5 y D (Unidirec.)", "Uso unidireccional oeste a este: esperar antes de CAT I y cruzar antes de reportar libre.", "18:01-05:59 · Hasta 26/11", "blue"),
         ("A2827/26", "P3 · Remolque A-L / F-L7", "Suspende SUP 12/24. Cruce remolque vía A-L y F-L7 esperando antes de CAT I.", "Todo el día · Hasta 26/11", "blue"),
         ("A3424/26", "Segregadas 16R / 16L", "RWY 16R solo aterrizajes y RWY 16L solo despegues (exc. emerg./medevac/HEAD).", "06:00-23:59 · Hasta 24/01/27", "blue"),
@@ -1022,9 +1078,9 @@ def build_unified_report():
 
     # Tarjetas CUSCO SPZO (Pagina 2)
     spzo_cards_spec = [
-        ("A3740/26", "Pista RWY 10/28", "Prohibido el giro de 180° en pista 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de pista).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
+        ("A3740/26", "RWY 10/28", "Prohibido el giro de 180° en RWY 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de RWY).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
         ("A3707/26", "Parte de TWY C", "Cierre por obras hasta antes de TWY D (trazo de sector aproximado; zona señalizada).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
-        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de calle de rodaje C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
+        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
     ]
     spzo_cards_html = []
     for spec in spzo_cards_spec + extra_spzo_cards:
@@ -1078,7 +1134,7 @@ def build_unified_report():
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
     # =========================================================================
     cited_ids = []
-    for nid, *_ in spjc_day_cards_spec + extra_spjc_cards + spjc_night_top_spec + spjc_night_bot_spec + spjc_procs_spec:
+    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_top_spec + extra_spjc_night_top + spjc_night_bot_spec + extra_spjc_night_bot + spjc_procs_spec:
         if nid in active and nid not in cited_ids:
             cited_ids.append(nid)
     for spec in spzo_cards_spec + extra_spzo_cards:
@@ -1205,13 +1261,13 @@ def build_unified_report():
 
   /* Tarjetas de mapa */
   .cards-row-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px; }}
-  .cards-row-6 {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; margin-bottom: 3px; }}
-  .cards-row-5 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 3px; }}
+  .cards-row-6 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-bottom: 2.5px; }}
+  .cards-row-5 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-top: 2.5px; }}
   .cards-row-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }}
   .procs-strip {{
-    margin-top: 6px;
+    margin-top: 4px;
     border-top: 1.2px solid #cbd5e1;
-    padding-top: 4px;
+    padding-top: 3px;
   }}
   .procs-title {{
     font-size: 8.3px;
@@ -1229,8 +1285,8 @@ def build_unified_report():
     background: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 3.5px;
-    padding: 3px 4.5px;
-    line-height: 1.18;
+    padding: 2px 3.5px;
+    line-height: 1.13;
   }}
   .mcard-red {{ border-color: #c53929; border-left: 3px solid #c53929; }}
   .mcard-amber {{ border-color: #d97706; border-left: 3px solid #d97706; }}
@@ -1266,11 +1322,14 @@ def build_unified_report():
     border: 1px solid #e2e8f0;
     border-radius: 3px;
     overflow: hidden;
+    text-align: center;
   }}
   .map-svg {{
     display: block;
     width: 100%;
+    max-height: 295px;
     height: auto;
+    margin: 0 auto;
   }}
   .spzo-wrap {{
     background: #ffffff;
@@ -1356,10 +1415,10 @@ def build_unified_report():
   }}
   .obs-empty {{ color: #94a3b8; display: block; text-align: center; }}
   table.ops-tbl td {{
-    padding: 4.5px 5px;
+    padding: 3.2px 4.5px;
     border: 1px solid #cbd5e1;
     vertical-align: middle;
-    line-height: 1.28;
+    line-height: 1.24;
     word-wrap: break-word;
   }}
   tr.sec-row td {{
@@ -1395,14 +1454,14 @@ def build_unified_report():
     text-decoration: underline;
   }}
   .sign-footer {{
-    margin-top: 8px;
+    margin-top: 5px;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
     font-size: 7.5px;
     color: #334155;
     border-top: 1px solid #cbd5e1;
-    padding-top: 5px;
+    padding-top: 4px;
   }}
   .sign-cols {{ display: flex; gap: 24px; font-weight: 700; color: #0f294a; }}
   .sign-notes {{ text-align: right; font-size: 6.8px; color: #64748b; max-width: 62%; }}
