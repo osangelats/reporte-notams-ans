@@ -386,11 +386,57 @@ def is_ans_reportable(n_obj, indicadores):
     iss_str = str(n_obj.get("issueDate", "")).strip()
     is_recent = iss_str >= "2026-11-20 18:00:00"
     is_core_ans = any(k in e_txt for k in (
-        "RWY", "TWY", "ILS", "VOR", "DME", "APAPI", "PAPI", "BIRD HAZARD",
+        "RWY", "TWY", "ILS", "VOR", "DME", "GNSS", "APAPI", "PAPI", "BIRD HAZARD",
         "VENTEO DE GAS", "TSA ", "PARACHUTE", "AIR DISPLAY", "GUN FIRING",
         "IAC ", "SID ", "STAR ", "GRADIENT", "AD CLSD"
     ))
     return is_recent and is_core_ans
+
+
+def classify_spjc_night_surface(n_obj):
+    """Clasifica por superficie (no por número fijo) cualquier NOTAM nocturno de SPJC con título original y coordenada exacta."""
+    u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
+    st_s = parse_utc(n_obj.get("startDate"))
+    en_s = parse_utc(n_obj.get("endDate"))
+    if st_s and en_s:
+        d1 = st_s.astimezone(LIMA_TZ).strftime("%d/%m")
+        d2 = en_s.astimezone(LIMA_TZ).strftime("%d/%m")
+        f_rng = d1 if d1 == d2 else f"{d1} - {d2}"
+    else:
+        f_rng = ""
+    sched = f"{f_rng} · 01:30-04:30" if f_rng else "01:30-04:30"
+
+    if "GATE TRANSFER U2" in u:
+        return ("bot", "Transf. U2", "Cerrada por obras. TWY V disponible.", sched, "red", (1235, 675))
+    if "GATE TRANSFER U3" in u:
+        return ("bot", "Transf. U3", "Cerrada por obras. TWY V disponible.", sched, "red", (1365, 636))
+    if "V5" in u and "U1" in u:
+        return ("bot", "U / U1 / V5", "U entre Q y U1 cerrada. U1 no disp. V5 cerrada.", sched, "red", (1058, 725))
+    if "V3" in u:
+        return ("bot", "U y V3", "U entre U3 y puesto 212, y V3 cerradas.", sched, "red", (1435, 616))
+    if "RWY 16R/34L CLSD" in u:
+        return ("bot", "RWY 16R/34L", "Pista cerrada por trabajos de mantenimiento.", sched, "red", (480, 1004))
+    if "STRIP RWY 16R/34L" in u:
+        return ("top", "Franja 16R/34L", "Obras en la franja de pista (referencia general).", sched, "amber", (1220, 758))
+    if "GATE TRANSFER M1" in u:
+        return ("top", "TWY M y M1", "M entre R y M1, y M1 cerradas por obras. Prever demoras.", sched, "red", (965, 428))
+    if "GATE TRANSFER M2" in u:
+        return ("top", "Transf. M2", "Cerrada por obras. Prever demoras.", sched, "red", (1142, 372))
+    if "GATE TRANSFER M3" in u:
+        return ("top", "Transf. M3", "Cerrada por obras. Prever demoras.", sched, "red", (1255, 338))
+    if "GATE TRANSFER M4" in u:
+        return ("top", "Transf. M4", "Cerrada por obras. Prever demoras.", sched, "red", (1412, 292))
+    if "BTN TWY R TO TWY M1" in u:
+        return ("top", "TWY M (R-M1)", "M entre R y M1 cerrada por obras. Prever demoras.", sched, "red", (910, 444))
+    if "BTN TWY M1 TO TWY M2" in u:
+        return ("top", "TWY M (M1-M2)", "M entre M1 y M2 cerrada por obras. Prever demoras.", sched, "red", (1055, 400))
+    if "BTN TWY M2 TO TWY M3" in u:
+        return ("top", "TWY M (M2-M3)", "M entre M2 y M3 cerrada por obras. Prever demoras.", sched, "red", (1200, 355))
+    if "BTN TWY M3 TO TWY M4" in u:
+        return ("top", "TWY M (M3-M4)", "M entre M3 y M4 cerrada por obras. Prever demoras.", sched, "red", (1335, 315))
+    if "TWY M" in u:
+        return ("top", "TWY M", translate_icao_to_spanish(n_obj), sched, "red", (870, 456))
+    return ("bot", "TWY U / V", translate_icao_to_spanish(n_obj), sched, "red", (1150, 700))
 
 
 def utc_hhmm_to_local_str(hhmm):
@@ -613,86 +659,50 @@ def render_spjc_day_svg(active, bg_uri):
     """
 
 
-def render_spjc_night_svg(active, bg_uri, active_top_ids=None, active_bot_ids=None):
+def render_spjc_night_svg(active, bg_uri, top_items=None, bot_items=None):
     overlays = []
-    active_top_ids = active_top_ids or []
-    active_bot_ids = active_bot_ids or []
+    top_items = top_items or []
+    bot_items = bot_items or []
 
-    def card_x(nid, id_list):
-        if nid not in id_list:
-            return None
-        idx = id_list.index(nid)
-        n_tot = len(id_list)
+    def card_x(idx, n_tot):
         col = idx % 5
         cols_in_row = min(5, n_tot - (idx // 5) * 5)
         return (col + 0.5) * (1800.0 / max(1, cols_in_row))
 
-    # A3696/26: RWY 16R/34L cerrada 01:30-04:30 local
-    if "A3696/26" in active:
-        tx_3696 = card_x("A3696/26", active_bot_ids) or 180
+    # Trazos longitudinales de pista / franja / calles M y U
+    if any("RWY 16R/34L CLSD" in extract_item_e(active[nid]["icaoMessage"]).upper() for nid, *_ in bot_items if nid in active):
         overlays.append(
             '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="24" stroke-opacity="0.48"/>'
             '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="5"/>'
-            f'<line x1="{tx_3696:.1f}" y1="1200" x2="480" y2="1004" stroke="#c53929" stroke-width="2.2"/>'
         )
-    # A3695/26: Franja RWY 16R/34L obras 01:30-04:30 local
-    if "A3695/26" in active:
-        tx_3695 = card_x("A3695/26", active_top_ids) or 1350
+    if any("STRIP RWY 16R/34L" in extract_item_e(active[nid]["icaoMessage"]).upper() for nid, *_ in top_items if nid in active):
         overlays.append(
             '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
             '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-            f'<line x1="{tx_3695:.1f}" y1="0" x2="1220" y2="758" stroke="#d97706" stroke-width="1.8" stroke-opacity="0.75"/>'
         )
-    # TWY M (A3722, A3723, A3721, A3720, A3719, A3764, A3766, A3765, A3769)
-    if any(k in active for k in ("A3722/26", "A3723/26", "A3764/26", "A3766/26", "A3765/26", "A3769/26")):
+    if any(px < 1420 and py < 500 for _, _, _, _, _, (px, py) in top_items):
         overlays.append(
             '<line x1="822" y1="472" x2="1445" y2="288" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
-    m_pins = [
-        ("A3723/26", 965, 428),
-        ("A3722/26", 870, 456),
-        ("A3721/26", 1142, 372),
-        ("A3720/26", 1255, 338),
-        ("A3719/26", 1412, 292),
-        ("A3764/26", 910, 444),
-        ("A3766/26", 1055, 400),
-        ("A3765/26", 1200, 355),
-        ("A3769/26", 1335, 315),
-    ]
-    for nid, px, py in m_pins:
-        if nid in active:
-            tx = card_x(nid, active_top_ids)
-            if tx is not None:
-                overlays.append(
-                    f'<line x1="{tx:.1f}" y1="0" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
-                )
-            overlays.append(
-                f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
-            )
-
-    # TWY U / U1 / U2 / U3 / V3 / V5 (A3725, A3718, A3717, A3729, A3763, A3762)
-    if any(k in active for k in ("A3725/26", "A3729/26", "A3763/26", "A3762/26")):
+    if any(py < 900 for _, _, _, _, _, (px, py) in bot_items):
         overlays.append(
             '<line x1="840" y1="775" x2="1465" y2="592" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
-    u_pins = [
-        ("A3725/26", 1058, 725),
-        ("A3718/26", 1235, 675),
-        ("A3763/26", 1235, 675),
-        ("A3717/26", 1365, 636),
-        ("A3762/26", 1365, 636),
-        ("A3729/26", 1435, 616),
-    ]
-    for nid, px, py in u_pins:
-        if nid in active:
-            tx = card_x(nid, active_bot_ids)
-            if tx is not None:
-                overlays.append(
-                    f'<line x1="{tx:.1f}" y1="1200" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
-                )
-            overlays.append(
-                f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
-            )
+
+    # Líneas y pines exactos para cada tarjeta superior activa
+    for idx, (nid, _, _, _, tone, (px, py)) in enumerate(top_items):
+        tx = card_x(idx, len(top_items))
+        col_str = "#d97706" if tone == "amber" else "#c53929"
+        overlays.append(f'<line x1="{tx:.1f}" y1="0" x2="{px}" y2="{py}" stroke="{col_str}" stroke-width="1.8" stroke-opacity="0.78"/>')
+        if py < 600:
+            overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="{col_str}" stroke="#ffffff" stroke-width="2.5"/>')
+
+    # Líneas y pines exactos para cada tarjeta inferior activa
+    for idx, (nid, _, _, _, tone, (px, py)) in enumerate(bot_items):
+        tx = card_x(idx, len(bot_items))
+        overlays.append(f'<line x1="{tx:.1f}" y1="1200" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.78"/>')
+        if py < 950:
+            overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>')
     # V3 (A3729/26) & V5 (A3725/26) inline pins
     if "A3729/26" in active:
         overlays.append(
@@ -974,36 +984,34 @@ def build_unified_report():
         })
 
     # Descubrimiento automático en vivo de cualquier NOTAM ANS nuevo publicado hoy o en adelante
-    pre_mapped_planos = {
-        "A3730/26", "A3723/26", "A3722/26", "A3721/26", "A3720/26",
-        "A3695/26", "A3719/26", "A3696/26", "A3725/26", "A3718/26", "A3717/26",
-        "A3729/26", "A3523/26", "A2828/26", "A2830/26", "A2827/26", "A3424/26",
+    pre_mapped_procs_and_spzo = {
+        "A3730/26", "A3523/26", "A2828/26", "A2830/26", "A2827/26", "A3424/26",
         "A3341/26", "A3527/26", "A2863/26", "A3740/26", "A3707/26", "A3711/26",
-        "A3762/26", "A3763/26", "A3764/26", "A3765/26", "A3766/26", "A3769/26",
     }
     extra_spjc_day = []
-    extra_spjc_night_top = []
-    extra_spjc_night_bot = []
+    spjc_night_top_items = []
+    spjc_night_bot_items = []
     extra_spzo_cards = []
     for nid, n_obj in sorted(active.items(), key=lambda x: (str(x[1].get("facilityDesignator", "")), x[0])):
-        if nid in known_ids or nid in pre_mapped_planos:
-            continue
-        if not is_ans_reportable(n_obj, indicadores):
+        if nid in known_ids or nid in pre_mapped_procs_and_spzo:
             continue
         icao = str(n_obj.get("facilityDesignator", "")).strip().upper()
         msg_e = extract_item_e(n_obj.get("icaoMessage", ""))
+        if icao == "SPJC" and is_movement_area_spjc_spzo(icao, msg_e) and is_spjc_night_notam(n_obj):
+            panel, title, body, sched, tone, pin_xy = classify_spjc_night_surface(n_obj)
+            if panel == "top":
+                spjc_night_top_items.append((nid, title, body, sched, tone, pin_xy))
+            else:
+                spjc_night_bot_items.append((nid, title, body, sched, tone, pin_xy))
+            continue
+        if not is_ans_reportable(n_obj, indicadores):
+            continue
         if is_movement_area_spjc_spzo(icao, msg_e):
             sched = f"Vig: {fmt_local_short(n_obj.get('startDate'))} - {fmt_local_short(n_obj.get('endDate'))} LOCAL"
             if icao == "SPJC":
-                if is_spjc_night_notam(n_obj):
-                    if any(k in msg_e.upper() for k in ("TWY U", "U1", "U2", "U3", "TWY V", "16R/34L")):
-                        extra_spjc_night_bot.append((nid, "SPJC Noche", translate_icao_to_spanish(n_obj), sched, "red"))
-                    else:
-                        extra_spjc_night_top.append((nid, "SPJC Noche", translate_icao_to_spanish(n_obj), sched, "red"))
-                else:
-                    extra_spjc_day.append((nid, "SPJC Día", translate_icao_to_spanish(n_obj), sched, "red"))
+                extra_spjc_day.append((nid, "RWY / TWY", translate_icao_to_spanish(n_obj), sched, "red"))
             else:
-                extra_spzo_cards.append((nid, "SPZO Nuevo", translate_icao_to_spanish(n_obj), sched, "red"))
+                extra_spzo_cards.append((nid, "RWY / TWY", translate_icao_to_spanish(n_obj), sched, "red"))
             continue
 
         if icao in LIMA_ICAOS:
@@ -1051,47 +1059,24 @@ def build_unified_report():
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_day_cards_html.append(card_link(nid, title, body, sched, tone, badge))
 
-    spjc_night_top_spec = [
-        ("A3764/26", "TWY M (R-M1)", "TWY M cerrada entre R y M1 por obras. Prever demoras.", "28/11 · 01:30-04:30", "red"),
-        ("A3766/26", "TWY M (M1-M2)", "TWY M cerrada entre M1 y M2 por obras. Prever demoras.", "29/11 · 01:30-04:30", "red"),
-        ("A3765/26", "TWY M (M2-M3)", "TWY M cerrada entre M2 y M3 por obras. Prever demoras.", "30/11 · 01:30-04:30", "red"),
-        ("A3769/26", "TWY M (M3-M4)", "TWY M cerrada entre M3 y M4 por obras. Prever demoras.", "01/12 · 01:30-04:30", "red"),
-        ("A3723/26", "TWY M y M1", "M entre R y M1, y M1 cerradas por obras. Prever demoras.", "02/12 - 03/12 · 01:30-04:30", "red"),
-        ("A3722/26", "TWY M", "Cerrada por obras. Transferencias M1, M2, M3 y M4 disponibles.", "28/11 - 01/12 · 01:30-04:30", "red"),
-        ("A3721/26", "Transf. M2", "Cerrada por obras. Prever demoras.", "04/12 - 10/12 · 01:30-04:30", "red"),
-        ("A3720/26", "Transf. M3", "Cerrada por obras. Prever demoras.", "11/12 - 12/12 · 01:30-04:30", "red"),
-        ("A3695/26", "Franja 16R/34L", "Obras en la franja de RWY (referencia general).", "18/11 - 28/11 · 01:30-04:30", "amber"),
-        ("A3719/26", "Transf. M4", "Cerrada por obras. Prever demoras.", "13/12 - 14/12 · 01:30-04:30", "red"),
-    ]
-    spjc_night_bot_spec = [
-        ("A3696/26", "RWY 16R/34L", "RWY cerrada por trabajos de mantenimiento.", "18/11 - 28/11 · 01:30-04:30", "red"),
-        ("A3725/26", "U / U1 / V5", "U entre Q y U1 cerrada. U1 no disp. V5 cerrada.", "22/11 - 23/11 · 01:30-04:30", "red"),
-        ("A3763/26", "Transf. U2", "Cerrada por obras. TWY V disponible.", "24/11 - 25/11 · 01:30-04:30", "red"),
-        ("A3762/26", "Transf. U3", "Cerrada por obras. TWY V disponible.", "26/11 - 27/11 · 01:30-04:30", "red"),
-        ("A3718/26", "Transf. U2", "Cerrada por trabajos de mantenimiento.", "24/11 - 25/11 · 01:30-04:30", "red"),
-        ("A3717/26", "Transf. U3", "Cerrada por trabajos de mantenimiento.", "26/11 - 27/11 · 01:30-04:30", "red"),
-        ("A3729/26", "U y V3", "U entre U3 y puesto 212, y V3 cerradas. U2/U3 disp.", "21/11 · 01:30-04:30", "red"),
-    ]
+    # Ordenar tarjetas nocturnas SPJC de izquierda a derecha según su coordenada X en el plano para que las líneas nunca se crucen
+    spjc_night_top_items.sort(key=lambda item: item[5][0])
+    spjc_night_bot_items.sort(key=lambda item: item[5][0])
+
     spjc_night_top_html = []
-    active_night_top_ids = []
-    for nid, title, body, sched, tone in spjc_night_top_spec + extra_spjc_night_top:
-        if nid in active:
-            active_night_top_ids.append(nid)
-            badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
-            spjc_night_top_html.append(card_link(nid, title, body, sched, tone, badge))
+    for nid, title, body, sched, tone, _ in spjc_night_top_items:
+        badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
+        spjc_night_top_html.append(card_link(nid, title, body, sched, tone, badge))
 
     spjc_night_bot_html = []
-    active_night_bot_ids = []
-    for nid, title, body, sched, tone in spjc_night_bot_spec + extra_spjc_night_bot:
-        if nid in active:
-            active_night_bot_ids.append(nid)
-            badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
-            spjc_night_bot_html.append(card_link(nid, title, body, sched, tone, badge))
+    for nid, title, body, sched, tone, _ in spjc_night_bot_items:
+        badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
+        spjc_night_bot_html.append(card_link(nid, title, body, sched, tone, badge))
 
-    # Procedimientos en superficie SPJC (strip inferior unificado)
+    # Procedimientos en superficie SPJC (strip inferior unificado - títulos originales)
     spjc_procs_spec = [
         ("A3523/26", "P1 · TWY L", "Espera 16L en TWY L (L1 no es punto de espera). No cruzar sin autorización ATC.", "Todo el día · Hasta 31/01/27", "blue"),
-        ("A2828/26", "P2 · L5 y D (Bidirec.)", "RWY 16L/34R en uso bidireccional: esperar antes de CAT I y reportar RWY libre.", "06:00-18:00 · Hasta 26/11", "blue"),
+        ("A2828/26", "P2 · L5 y D (Bidirec.)", "Pista 16L/34R en uso bidireccional: esperar antes de CAT I y reportar pista libre.", "06:00-18:00 · Hasta 26/11", "blue"),
         ("A2830/26", "P2 · L5 y D (Unidirec.)", "Uso unidireccional oeste a este: esperar antes de CAT I y cruzar antes de reportar libre.", "18:01-05:59 · Hasta 26/11", "blue"),
         ("A2827/26", "P3 · Remolque A-L / F-L7", "Suspende SUP 12/24. Cruce remolque vía A-L y F-L7 esperando antes de CAT I.", "Todo el día · Hasta 26/11", "blue"),
         ("A3424/26", "Segregadas 16R / 16L", "RWY 16R solo aterrizajes y RWY 16L solo despegues (exc. emerg./medevac/HEAD).", "06:00-23:59 · Hasta 24/01/27", "blue"),
@@ -1104,11 +1089,11 @@ def build_unified_report():
         if nid in active:
             spjc_procs_html.append(card_link(nid, title, body, sched, tone))
 
-    # Tarjetas CUSCO SPZO (Pagina 2)
+    # Tarjetas CUSCO SPZO (Pagina 2 - títulos originales)
     spzo_cards_spec = [
-        ("A3740/26", "RWY 10/28", "Prohibido el giro de 180° en RWY 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de RWY).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
+        ("A3740/26", "Pista RWY 10/28", "Prohibido el giro de 180° en pista 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de pista).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
         ("A3707/26", "Parte de TWY C", "Cierre por obras hasta antes de TWY D (trazo de sector aproximado; zona señalizada).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
-        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
+        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de calle de rodaje C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
     ]
     spzo_obs_parts = []
     if "A3740/26" in active:
@@ -1176,7 +1161,7 @@ def build_unified_report():
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
     # =========================================================================
     cited_ids = []
-    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_top_spec + extra_spjc_night_top + spjc_night_bot_spec + extra_spjc_night_bot + spjc_procs_spec:
+    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_top_items + spjc_night_bot_items + spjc_procs_spec:
         if nid in active and nid not in cited_ids:
             cited_ids.append(nid)
     for spec in spzo_cards_spec + extra_spzo_cards:
@@ -1597,7 +1582,7 @@ def build_unified_report():
         {''.join(spjc_night_top_html)}
       </div>
       <div class="map-wrap">
-        {render_spjc_night_svg(active, spjc_bg_uri, active_night_top_ids, active_night_bot_ids)}
+        {render_spjc_night_svg(active, spjc_bg_uri, spjc_night_top_items, spjc_night_bot_items)}
       </div>
       <div class="cards-row-5">
         {''.join(spjc_night_bot_html)}
