@@ -613,20 +613,35 @@ def render_spjc_day_svg(active, bg_uri):
     """
 
 
-def render_spjc_night_svg(active, bg_uri):
+def render_spjc_night_svg(active, bg_uri, active_top_ids=None, active_bot_ids=None):
     overlays = []
+    active_top_ids = active_top_ids or []
+    active_bot_ids = active_bot_ids or []
+
+    def card_x(nid, id_list):
+        if nid not in id_list:
+            return None
+        idx = id_list.index(nid)
+        n_tot = len(id_list)
+        col = idx % 5
+        cols_in_row = min(5, n_tot - (idx // 5) * 5)
+        return (col + 0.5) * (1800.0 / max(1, cols_in_row))
+
     # A3696/26: RWY 16R/34L cerrada 01:30-04:30 local
     if "A3696/26" in active:
+        tx_3696 = card_x("A3696/26", active_bot_ids) or 180
         overlays.append(
             '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="24" stroke-opacity="0.48"/>'
             '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="5"/>'
-            '<line x1="180" y1="1200" x2="480" y2="1004" stroke="#c53929" stroke-width="2.2"/>'
+            f'<line x1="{tx_3696:.1f}" y1="1200" x2="480" y2="1004" stroke="#c53929" stroke-width="2.2"/>'
         )
     # A3695/26: Franja RWY 16R/34L obras 01:30-04:30 local
     if "A3695/26" in active:
+        tx_3695 = card_x("A3695/26", active_top_ids) or 1350
         overlays.append(
             '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
             '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
+            f'<line x1="{tx_3695:.1f}" y1="0" x2="1220" y2="758" stroke="#d97706" stroke-width="1.8" stroke-opacity="0.75"/>'
         )
     # TWY M (A3722, A3723, A3721, A3720, A3719, A3764, A3766, A3765, A3769)
     if any(k in active for k in ("A3722/26", "A3723/26", "A3764/26", "A3766/26", "A3765/26", "A3769/26")):
@@ -634,24 +649,26 @@ def render_spjc_night_svg(active, bg_uri):
             '<line x1="822" y1="472" x2="1445" y2="288" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
     m_pins = [
-        ("A3723/26", 965, 428, 160, 0),
-        ("A3722/26", 870, 456, 460, 0),
-        ("A3721/26", 1142, 372, 760, 0),
-        ("A3720/26", 1255, 338, 1060, 0),
-        ("A3719/26", 1412, 292, 1640, 0),
-        ("A3764/26", 910, 444, 300, 0),
-        ("A3766/26", 1055, 400, 620, 0),
-        ("A3765/26", 1200, 355, 920, 0),
-        ("A3769/26", 1335, 315, 1480, 0),
+        ("A3723/26", 965, 428),
+        ("A3722/26", 870, 456),
+        ("A3721/26", 1142, 372),
+        ("A3720/26", 1255, 338),
+        ("A3719/26", 1412, 292),
+        ("A3764/26", 910, 444),
+        ("A3766/26", 1055, 400),
+        ("A3765/26", 1200, 355),
+        ("A3769/26", 1335, 315),
     ]
-    for nid, px, py, tx, ty in m_pins:
+    for nid, px, py in m_pins:
         if nid in active:
+            tx = card_x(nid, active_top_ids)
+            if tx is not None:
+                overlays.append(
+                    f'<line x1="{tx:.1f}" y1="0" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
+                )
             overlays.append(
-                f'<line x1="{tx}" y1="{ty}" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
                 f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
             )
-    if "A3695/26" in active:
-        overlays.append('<line x1="1350" y1="0" x2="1220" y2="758" stroke="#d97706" stroke-width="1.8" stroke-opacity="0.75"/>')
 
     # TWY U / U1 / U2 / U3 / V3 / V5 (A3725, A3718, A3717, A3729, A3763, A3762)
     if any(k in active for k in ("A3725/26", "A3729/26", "A3763/26", "A3762/26")):
@@ -659,17 +676,21 @@ def render_spjc_night_svg(active, bg_uri):
             '<line x1="840" y1="775" x2="1465" y2="592" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
         )
     u_pins = [
-        ("A3725/26", 1058, 725, 540, 1200),
-        ("A3718/26", 1235, 675, 900, 1200),
-        ("A3763/26", 1235, 675, 900, 1200),
-        ("A3717/26", 1365, 636, 1260, 1200),
-        ("A3762/26", 1365, 636, 1260, 1200),
-        ("A3729/26", 1435, 616, 1620, 1200),
+        ("A3725/26", 1058, 725),
+        ("A3718/26", 1235, 675),
+        ("A3763/26", 1235, 675),
+        ("A3717/26", 1365, 636),
+        ("A3762/26", 1365, 636),
+        ("A3729/26", 1435, 616),
     ]
-    for nid, px, py, tx, ty in u_pins:
+    for nid, px, py in u_pins:
         if nid in active:
+            tx = card_x(nid, active_bot_ids)
+            if tx is not None:
+                overlays.append(
+                    f'<line x1="{tx:.1f}" y1="1200" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
+                )
             overlays.append(
-                f'<line x1="{tx}" y1="{ty}" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.75"/>'
                 f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
             )
     # V3 (A3729/26) & V5 (A3725/26) inline pins
@@ -1052,14 +1073,18 @@ def build_unified_report():
         ("A3729/26", "U y V3", "U entre U3 y puesto 212, y V3 cerradas. U2/U3 disp.", "21/11 · 01:30-04:30", "red"),
     ]
     spjc_night_top_html = []
+    active_night_top_ids = []
     for nid, title, body, sched, tone in spjc_night_top_spec + extra_spjc_night_top:
         if nid in active:
+            active_night_top_ids.append(nid)
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_night_top_html.append(card_link(nid, title, body, sched, tone, badge))
 
     spjc_night_bot_html = []
+    active_night_bot_ids = []
     for nid, title, body, sched, tone in spjc_night_bot_spec + extra_spjc_night_bot:
         if nid in active:
+            active_night_bot_ids.append(nid)
             badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
             spjc_night_bot_html.append(card_link(nid, title, body, sched, tone, badge))
 
@@ -1224,8 +1249,9 @@ def build_unified_report():
     gap: 14px;
   }}
   .top-hdr-left img {{
-    height: 36px;
+    height: 34px;
     width: auto;
+    flex-shrink: 0;
   }}
   .top-title {{
     font-size: 14.5px;
@@ -1571,7 +1597,7 @@ def build_unified_report():
         {''.join(spjc_night_top_html)}
       </div>
       <div class="map-wrap">
-        {render_spjc_night_svg(active, spjc_bg_uri)}
+        {render_spjc_night_svg(active, spjc_bg_uri, active_night_top_ids, active_night_bot_ids)}
       </div>
       <div class="cards-row-5">
         {''.join(spjc_night_bot_html)}
