@@ -406,34 +406,43 @@ def classify_spjc_night_surface(n_obj):
         f_rng = ""
     sched = f"{f_rng} · 01:30-04:30" if f_rng else "01:30-04:30"
 
+    extra_info = []
+    if "TWY L AVBL" in u:
+        extra_info.append("TWY L disponible.")
+    if "TWY V IS AVBL" in u or "TWY V AVBL" in u:
+        extra_info.append("TWY V disponible.")
+    if "EXP DLA" in u:
+        extra_info.append("ACFT prever demoras.")
+    tail = (" " + " ".join(extra_info)) if extra_info else ""
+
     if "GATE TRANSFER U2" in u:
-        return ("bot", "Transf. U2", "Cerrada por obras. TWY V disponible.", sched, "red", (1235, 675))
+        return ("bot", "Transf. U2", f"Cerrada por obras.{tail}", sched, "red", (1235, 675))
     if "GATE TRANSFER U3" in u:
-        return ("bot", "Transf. U3", "Cerrada por obras. TWY V disponible.", sched, "red", (1365, 636))
+        return ("bot", "Transf. U3", f"Cerrada por obras.{tail}", sched, "red", (1365, 636))
     if "V5" in u and "U1" in u:
         return ("bot", "U / U1 / V5", "U entre Q y U1 cerrada. U1 no disp. V5 cerrada.", sched, "red", (1058, 725))
     if "V3" in u:
         return ("bot", "U y V3", "U entre U3 y puesto 212, y V3 cerradas.", sched, "red", (1435, 616))
     if "RWY 16R/34L CLSD" in u:
-        return ("bot", "RWY 16R/34L", "Pista cerrada por trabajos de mantenimiento.", sched, "red", (480, 1004))
+        return ("bot", "RWY 16R/34L", "RWY cerrada por trabajos de mantenimiento.", sched, "red", (480, 1004))
     if "STRIP RWY 16R/34L" in u:
-        return ("top", "Franja 16R/34L", "Obras en la franja de pista (referencia general).", sched, "amber", (1220, 758))
+        return ("top", "Franja 16R/34L", "Obras en la franja de RWY (referencia general).", sched, "amber", (1220, 758))
     if "GATE TRANSFER M1" in u:
-        return ("top", "TWY M y M1", "M entre R y M1, y M1 cerradas por obras. Prever demoras.", sched, "red", (965, 428))
+        return ("top", "TWY M y M1", f"TWY M entre R y M1 cerrada; M1 no disponible.{tail}", sched, "red", (965, 428))
     if "GATE TRANSFER M2" in u:
-        return ("top", "Transf. M2", "Cerrada por obras. Prever demoras.", sched, "red", (1142, 372))
+        return ("top", "Transf. M2", f"Cerrada por obras.{tail}", sched, "red", (1142, 372))
     if "GATE TRANSFER M3" in u:
-        return ("top", "Transf. M3", "Cerrada por obras. Prever demoras.", sched, "red", (1255, 338))
+        return ("top", "Transf. M3", f"Cerrada por obras.{tail}", sched, "red", (1255, 338))
     if "GATE TRANSFER M4" in u:
-        return ("top", "Transf. M4", "Cerrada por obras. Prever demoras.", sched, "red", (1412, 292))
+        return ("top", "Transf. M4", f"Cerrada por obras.{tail}", sched, "red", (1412, 292))
     if "BTN TWY R TO TWY M1" in u:
-        return ("top", "TWY M (R-M1)", "M entre R y M1 cerrada por obras. Prever demoras.", sched, "red", (910, 444))
+        return ("top", "TWY M (R-M1)", f"TWY M cerrada entre R y M1 por obras.{tail}", sched, "red", (910, 444))
     if "BTN TWY M1 TO TWY M2" in u:
-        return ("top", "TWY M (M1-M2)", "M entre M1 y M2 cerrada por obras. Prever demoras.", sched, "red", (1055, 400))
+        return ("top", "TWY M (M1-M2)", f"TWY M cerrada entre M1 y M2 por obras.{tail}", sched, "red", (1055, 400))
     if "BTN TWY M2 TO TWY M3" in u:
-        return ("top", "TWY M (M2-M3)", "M entre M2 y M3 cerrada por obras. Prever demoras.", sched, "red", (1200, 355))
+        return ("top", "TWY M (M2-M3)", f"TWY M cerrada entre M2 y M3 por obras.{tail}", sched, "red", (1200, 355))
     if "BTN TWY M3 TO TWY M4" in u:
-        return ("top", "TWY M (M3-M4)", "M entre M3 y M4 cerrada por obras. Prever demoras.", sched, "red", (1335, 315))
+        return ("top", "TWY M (M3-M4)", f"TWY M cerrada entre M3 y M4 por obras.{tail}", sched, "red", (1335, 315))
     if "TWY M" in u:
         return ("top", "TWY M", translate_icao_to_spanish(n_obj), sched, "red", (870, 456))
     return ("bot", "TWY U / V", translate_icao_to_spanish(n_obj), sched, "red", (1150, 700))
@@ -1073,10 +1082,10 @@ def build_unified_report():
         badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
         spjc_night_bot_html.append(card_link(nid, title, body, sched, tone, badge))
 
-    # Procedimientos en superficie SPJC (strip inferior unificado - títulos originales)
+    # Procedimientos en superficie SPJC (strip inferior unificado)
     spjc_procs_spec = [
         ("A3523/26", "P1 · TWY L", "Espera 16L en TWY L (L1 no es punto de espera). No cruzar sin autorización ATC.", "Todo el día · Hasta 31/01/27", "blue"),
-        ("A2828/26", "P2 · L5 y D (Bidirec.)", "Pista 16L/34R en uso bidireccional: esperar antes de CAT I y reportar pista libre.", "06:00-18:00 · Hasta 26/11", "blue"),
+        ("A2828/26", "P2 · L5 y D (Bidirec.)", "RWY 16L/34R en uso bidireccional: esperar antes de CAT I y reportar RWY libre.", "06:00-18:00 · Hasta 26/11", "blue"),
         ("A2830/26", "P2 · L5 y D (Unidirec.)", "Uso unidireccional oeste a este: esperar antes de CAT I y cruzar antes de reportar libre.", "18:01-05:59 · Hasta 26/11", "blue"),
         ("A2827/26", "P3 · Remolque A-L / F-L7", "Suspende SUP 12/24. Cruce remolque vía A-L y F-L7 esperando antes de CAT I.", "Todo el día · Hasta 26/11", "blue"),
         ("A3424/26", "Segregadas 16R / 16L", "RWY 16R solo aterrizajes y RWY 16L solo despegues (exc. emerg./medevac/HEAD).", "06:00-23:59 · Hasta 24/01/27", "blue"),
@@ -1089,11 +1098,11 @@ def build_unified_report():
         if nid in active:
             spjc_procs_html.append(card_link(nid, title, body, sched, tone))
 
-    # Tarjetas CUSCO SPZO (Pagina 2 - títulos originales)
+    # Tarjetas CUSCO SPZO (Pagina 2)
     spzo_cards_spec = [
-        ("A3740/26", "Pista RWY 10/28", "Prohibido el giro de 180° en pista 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de pista).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
+        ("A3740/26", "RWY 10/28", "Prohibido el giro de 180° en RWY 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de RWY).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
         ("A3707/26", "Parte de TWY C", "Cierre por obras hasta antes de TWY D (trazo de sector aproximado; zona señalizada).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
-        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de calle de rodaje C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
+        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
     ]
     spzo_obs_parts = []
     if "A3740/26" in active:
