@@ -2,8 +2,8 @@ name: Reporte Diario NOTAMs ANS
 
 on:
   schedule:
-    # Lunes a Viernes a las 9:00 AM hora Lima (14:00 UTC)
-    - cron: '0 14 * * 1-5'
+    # Lunes a Viernes a las 8:52 AM hora Lima (13:52 UTC, minuto sin congestion)
+    - cron: '52 13 * * 1-5'
   # Permite ejecutarlo manualmente en cualquier momento desde tu celular o PC
   workflow_dispatch:
 

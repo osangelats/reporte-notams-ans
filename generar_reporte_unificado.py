@@ -71,7 +71,7 @@ def upload_via_apps_script_webhook(file_paths):
     webhook_url = os.environ.get("DRIVE_WEBHOOK_URL", "").strip()
     if not webhook_url:
         return False
-    secret = os.environ.get("DRIVE_WEBHOOK_SECRET", "DGAC_CTNAV_NOTAM_2026").strip()
+    secret = os.environ.get("DRIVE_WEBHOOK_SECRET", "").strip() or "DGAC_CTNAV_NOTAM_2026"
     payload_files = []
     for path, mime in file_paths:
         with open(path, "rb") as f:
@@ -94,6 +94,9 @@ def upload_via_apps_script_webhook(file_paths):
     with urllib.request.urlopen(req, timeout=60) as resp:
         res_txt = resp.read().decode("utf-8", errors="replace")
         print(f"Sincronización en la nube (Apps Script): {resp.status} -> {res_txt[:200]}")
+        res_json = json.loads(res_txt)
+        if not res_json.get("ok"):
+            raise RuntimeError(f"Error al subir a Google Drive: {res_txt}")
     return True
 
 
