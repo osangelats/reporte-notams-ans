@@ -1373,13 +1373,18 @@ def build_unified_report():
   .lbl-spzo-term {{ font-size: 22px; font-weight: 800; fill: #0f294a; }}
 
   .legend-bar {{
-    margin-top: 5px;
-    font-size: 7px;
-    color: #475569;
+    margin-bottom: 5px;
+    font-size: 8.0px;
+    font-weight: 600;
+    color: #0f172a;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-left: 3.5px solid #0f294a;
+    border-radius: 4px;
+    padding: 3.5px 8px;
     display: flex;
     justify-content: space-between;
-    border-top: 1px solid #e2e8f0;
-    padding-top: 3px;
+    align-items: center;
   }}
   .dot-r {{ color: #c53929; font-weight: 800; }}
   .dot-a {{ color: #d97706; font-weight: 800; }}
@@ -1536,6 +1541,11 @@ def build_unified_report():
     </div>
   </div>
 
+  <div class="legend-bar">
+    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> obras / limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento &nbsp;|&nbsp; Clic en cada código NOTAM para ver el texto íntegro OACI.</div>
+    <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Trazado referencial sobre AIRAC AIP SUP 34/2025</div>
+  </div>
+
   <div class="spjc-grid">
     <!-- BLOQUE DIA -->
     <div class="panel">
@@ -1576,11 +1586,6 @@ def build_unified_report():
       {''.join(spjc_procs_html)}
     </div>
   </div>
-
-  <div class="legend-bar">
-    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> obras / limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento &nbsp;|&nbsp; Clic en cada código NOTAM para ver el texto íntegro OACI.</div>
-    <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Trazado referencial sobre AIRAC AIP SUP 34/2025</div>
-  </div>
 </div>
 
 <!-- ==================== PAGINA 2: CUSCO SPZO ==================== -->
@@ -1599,7 +1604,12 @@ def build_unified_report():
     </div>
   </div>
 
-  <div class="cards-row-3" style="margin-top: 10px;">
+  <div class="legend-bar" style="margin-bottom: 10px;">
+    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento / disponibilidad</div>
+    <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Geometría manual referencial sobre AD 2 SPZO 09</div>
+  </div>
+
+  <div class="cards-row-3">
     {''.join(spzo_cards_html)}
   </div>
 
@@ -1609,11 +1619,6 @@ def build_unified_report():
 
   <div class="spzo-note">
     <strong>Observaciones operacionales SPZO:</strong> {spzo_obs_html}
-  </div>
-
-  <div class="legend-bar" style="margin-top: 16px;">
-    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento / disponibilidad</div>
-    <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Geometría manual referencial sobre AD 2 SPZO 09</div>
   </div>
 </div>
 
