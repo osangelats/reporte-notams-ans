@@ -397,7 +397,12 @@ def is_ans_reportable(n_obj, indicadores):
 
 
 def classify_spjc_night_surface(n_obj):
-    """Clasifica por superficie (no por número fijo) cualquier NOTAM nocturno de SPJC con título original y coordenada exacta."""
+    """
+    Clasifica por superficie cualquier NOTAM nocturno de SPJC sobre el plano esquemático (0..1800 x 0..1180):
+      - 'top': tramos longitudinales de TWY M (encima del plano, apuntando hacia abajo a TWY M y=440)
+      - 'mid': puertas de entrada/transferencia M1..M4 (en el espacio central y=535, apuntando directo arriba a M1..M4 y=492)
+      - 'bot': RWY 16R/34L, Franja 16R/34L y puertas U1..U3 / TWY U-V (debajo de RWY 16R, apuntando directo arriba)
+    """
     u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
     st_s = parse_utc(n_obj.get("startDate"))
     en_s = parse_utc(n_obj.get("endDate"))
@@ -411,44 +416,44 @@ def classify_spjc_night_surface(n_obj):
 
     extra_info = []
     if "TWY L AVBL" in u:
-        extra_info.append("TWY L disponible.")
+        extra_info.append("TWY L disp.")
     if "TWY V IS AVBL" in u or "TWY V AVBL" in u:
-        extra_info.append("TWY V disponible.")
+        extra_info.append("TWY V disp.")
     if "EXP DLA" in u:
         extra_info.append("ACFT prever demoras.")
     tail = (" " + " ".join(extra_info)) if extra_info else ""
 
     if "GATE TRANSFER U2" in u:
-        return ("bot", "Transf. U2", f"Cerrada por obras.{tail}", sched, "red", (1235, 675))
+        return ("bot", "Transf. U2", f"Cerrada por obras.{tail}", sched, "red", (1245, 695))
     if "GATE TRANSFER U3" in u:
-        return ("bot", "Transf. U3", f"Cerrada por obras.{tail}", sched, "red", (1365, 636))
-    if "V5" in u and "U1" in u:
-        return ("bot", "U / U1 / V5", "U entre Q y U1 cerrada. U1 no disp. V5 cerrada.", sched, "red", (1058, 725))
+        return ("bot", "Transf. U3", f"Cerrada por obras.{tail}", sched, "red", (1480, 695))
+    if "GATE TRANSFER U1" in u or ("V5" in u and "U1" in u):
+        return ("bot", "U / U1 / V5", f"U entre Q y U1 cerrada; U1/V5 no disp.{tail}", sched, "red", (1010, 695))
     if "V3" in u:
-        return ("bot", "U y V3", "U entre U3 y puesto 212, y V3 cerradas.", sched, "red", (1435, 616))
+        return ("bot", "TWY U y V3", f"Cerradas por obras.{tail}", sched, "red", (1130, 760))
     if "RWY 16R/34L CLSD" in u:
-        return ("bot", "RWY 16R/34L", "RWY cerrada por trabajos de mantenimiento.", sched, "red", (480, 1004))
+        return ("bot", "RWY 16R/34L", "RWY cerrada por trabajos de mantenimiento.", sched, "red", (280, 885))
     if "STRIP RWY 16R/34L" in u:
-        return ("top", "Franja 16R/34L", "Obras en la franja de RWY (referencia general).", sched, "amber", (1220, 758))
+        return ("bot", "Franja 16R/34L", "Obras en la franja de RWY (referencia general).", sched, "amber", (680, 918))
     if "GATE TRANSFER M1" in u:
-        return ("top", "TWY M y M1", f"TWY M entre R y M1 cerrada; M1 no disponible.{tail}", sched, "red", (965, 428))
+        return ("mid", "TWY M y M1", f"TWY M (R-M1) y puerta M1 cerradas.{tail}", sched, "red", (970, 492))
     if "GATE TRANSFER M2" in u:
-        return ("top", "Transf. M2", f"Cerrada por obras.{tail}", sched, "red", (1142, 372))
+        return ("mid", "Transf. M2", f"Puerta M2 cerrada por obras.{tail}", sched, "red", (1185, 492))
     if "GATE TRANSFER M3" in u:
-        return ("top", "Transf. M3", f"Cerrada por obras.{tail}", sched, "red", (1255, 338))
+        return ("mid", "Transf. M3", f"Puerta M3 cerrada por obras.{tail}", sched, "red", (1400, 492))
     if "GATE TRANSFER M4" in u:
-        return ("top", "Transf. M4", f"Cerrada por obras.{tail}", sched, "red", (1412, 292))
+        return ("mid", "Transf. M4", f"Puerta M4 cerrada por obras.{tail}", sched, "red", (1615, 492))
     if "BTN TWY R TO TWY M1" in u:
-        return ("top", "TWY M (R-M1)", f"TWY M cerrada entre R y M1 por obras.{tail}", sched, "red", (910, 444))
+        return ("top", "TWY M (R-M1)", f"Cerrada entre R y M1 por obras.{tail}", sched, "red", (862, 440))
     if "BTN TWY M1 TO TWY M2" in u:
-        return ("top", "TWY M (M1-M2)", f"TWY M cerrada entre M1 y M2 por obras.{tail}", sched, "red", (1055, 400))
+        return ("top", "TWY M (M1-M2)", f"Cerrada entre M1 y M2 por obras.{tail}", sched, "red", (1078, 440))
     if "BTN TWY M2 TO TWY M3" in u:
-        return ("top", "TWY M (M2-M3)", f"TWY M cerrada entre M2 y M3 por obras.{tail}", sched, "red", (1200, 355))
+        return ("top", "TWY M (M2-M3)", f"Cerrada entre M2 y M3 por obras.{tail}", sched, "red", (1292, 440))
     if "BTN TWY M3 TO TWY M4" in u:
-        return ("top", "TWY M (M3-M4)", f"TWY M cerrada entre M3 y M4 por obras.{tail}", sched, "red", (1335, 315))
+        return ("top", "TWY M (M3-M4)", f"Cerrada entre M3 y M4 por obras.{tail}", sched, "red", (1508, 440))
     if "TWY M" in u:
-        return ("top", "TWY M", translate_icao_to_spanish(n_obj), sched, "red", (870, 456))
-    return ("bot", "TWY U / V", translate_icao_to_spanish(n_obj), sched, "red", (1150, 700))
+        return ("top", "TWY M", translate_icao_to_spanish(n_obj), sched, "red", (1078, 440))
+    return ("bot", "TWY U / V", translate_icao_to_spanish(n_obj), sched, "red", (1130, 725))
 
 
 def utc_hhmm_to_local_str(hhmm):
@@ -513,6 +518,9 @@ def preserve_acronyms(txt):
         txt = re.sub(rf"(?<![A-Za-z0-9]){re.escape(acr)}(?![A-Za-z0-9])", acr, txt, flags=re.IGNORECASE)
     txt = re.sub(r"\bch\s*([0-9]+[xy])\b", lambda m: f"CH {m.group(1).upper()}", txt, flags=re.IGNORECASE)
     txt = re.sub(r"\bmhz\b", "MHz", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\b(TWY|RWY)\s+([a-z0-9/]+)\b", lambda m: f"{m.group(1).upper()} {m.group(2).upper()}", txt, flags=re.IGNORECASE)
+    for tok in ("RNAV", "RNP", "AR", "JCL", "LPA", "SLS"):
+        txt = re.sub(rf"(?<![A-Za-z0-9]){tok}(?![A-Za-z0-9])", tok, txt, flags=re.IGNORECASE)
     return txt
 
 
@@ -547,6 +555,20 @@ def translate_icao_to_spanish(n_obj):
     if m_bird:
         return preserve_acronyms(f"Peligro de aves en RWY {m_bird.group(1)}.")
 
+    if "GNSS SIGNAL DEGRADATION" in u:
+        m_dist = re.search(r"(\d+\s*NM)\s+AND\s+BELOW\s+(\d+\s*FT)\s+FROM\s+([A-Z0-9]+)", u)
+        zona = f" dentro de {m_dist.group(1)} y por debajo de {m_dist.group(2)} respecto a {m_dist.group(3)}" if m_dist else ""
+        return preserve_acronyms(f"Degradación de señal GNSS reportada{zona}; procedimientos RNAV/RNP/AR afectados. Verificar posición con medios alternos y prever demoras.")
+
+    if "TWR WO VIS" in u:
+        m_vis = re.match(r"TWR\s+WO\s+VIS\s+TO\s+(.*?)(?:\s+DUE\s+TO\s+(.*))?$", u)
+        if m_vis:
+            zonas = m_vis.group(1).replace(" INT ", ", intersección ").replace(" AND ", " y ")
+            causa = m_vis.group(2) or ""
+            causa = re.sub(r"ACFT\s+PARKED\s+ON\s+STAND\s+NR\s*(\d+)", r"ACFT estacionada en puesto \1", causa, flags=re.IGNORECASE)
+            txt_vis = f"TWR sin visibilidad hacia {zonas}" + (f" debido a {causa}." if causa else ".")
+            return preserve_acronyms(txt_vis)
+
     if "AD CLSD" in u:
         return "AD cerrado de forma permanente." if str(n_obj.get("endDate", "")).upper() == "PERM" else "AD cerrado."
 
@@ -566,220 +588,298 @@ def translate_icao_to_spanish(n_obj):
     return txt
 
 
-def build_spjc_svg_base_labels():
-    """Etiquetas limpias sobre el plano base SPJC (viewBox 0 0 1800 1200)."""
-    # Coordenadas calibradas del PDF oficial (norm_x*1.8, norm_y*1.2)
+def build_spjc_schematic_base(include_proc_pins=True):
+    """
+    Plano esquemático limpio de SPJC (viewBox 0 0 1800 1180):
+    Únicamente pistas (RWY 16L/34R y 16R/34L), calles de rodaje (TWY) y puertas de transferencia (M1-M4, U1-U3).
+    """
+    twy_col = "#cbd5e1"
+    twy_bdr = "#94a3b8"
+    gate_col = "#64748b"
+    parts = [
+        '<rect x="0" y="0" width="1800" height="1180" fill="#f8fafc"/>',
+        # Salidas norte hacia plataforma antigua (A, B, C, D, E, G, F)
+        f'<line x1="220" y1="210" x2="1660" y2="210" stroke="{twy_col}" stroke-width="12" stroke-linecap="round"/>',
+        f'<line x1="260" y1="275" x2="220" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="560" y1="275" x2="500" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="850" y1="275" x2="790" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="1010" y1="275" x2="1010" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="1180" y1="275" x2="1240" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="1380" y1="275" x2="1440" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        f'<line x1="1660" y1="275" x2="1660" y2="210" stroke="{twy_col}" stroke-width="12"/>',
+        # Conectores L1, L3, L4, L5, L7 y calle paralela TWY L
+        f'<line x1="160" y1="275" x2="160" y2="360" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="480" y1="275" x2="480" y2="360" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="880" y1="275" x2="880" y2="360" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="1030" y1="275" x2="1030" y2="360" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="1660" y1="275" x2="1660" y2="360" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="140" y1="360" x2="1680" y2="360" stroke="{twy_col}" stroke-width="16" stroke-linecap="round"/>',
+        # Crossfield TWY Q y TWY R (R1 / R2)
+        f'<line x1="680" y1="360" x2="680" y2="800" stroke="{twy_col}" stroke-width="14"/>',
+        f'<line x1="755" y1="360" x2="755" y2="800" stroke="{twy_col}" stroke-width="15"/>',
+        # TWY M (y=440) y puertas de transferencia M1, M2, M3, M4 (y=440..492)
+        f'<line x1="970" y1="360" x2="970" y2="440" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="755" y1="440" x2="1620" y2="440" stroke="{twy_bdr}" stroke-width="16" stroke-linecap="round"/>',
+        f'<line x1="970" y1="440" x2="970" y2="492" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        f'<line x1="1185" y1="440" x2="1185" y2="492" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        f'<line x1="1400" y1="440" x2="1400" y2="492" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        f'<line x1="1615" y1="440" x2="1615" y2="492" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        # TWY U (y=725) y puertas de transferencia U1, U2, U3 (y=673..725)
+        f'<line x1="755" y1="725" x2="1600" y2="725" stroke="{twy_bdr}" stroke-width="16" stroke-linecap="round"/>',
+        f'<line x1="1010" y1="673" x2="1010" y2="725" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        f'<line x1="1245" y1="673" x2="1245" y2="725" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        f'<line x1="1480" y1="673" x2="1480" y2="725" stroke="{gate_col}" stroke-width="14" stroke-linecap="round"/>',
+        # TWY V (y=800) y conectores V1, V2, V3, V5
+        f'<line x1="90" y1="800" x2="1620" y2="800" stroke="{twy_col}" stroke-width="16" stroke-linecap="round"/>',
+        f'<line x1="110" y1="800" x2="110" y2="885" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="390" y1="800" x2="390" y2="885" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="1130" y1="725" x2="1130" y2="800" stroke="{twy_col}" stroke-width="13"/>',
+        f'<line x1="1600" y1="725" x2="1600" y2="885" stroke="{twy_col}" stroke-width="13"/>',
+        # Pista superior RWY 16L / 34R (y=275)
+        '<line x1="140" y1="275" x2="1680" y2="275" stroke="#334155" stroke-width="28" stroke-linecap="butt"/>',
+        '<line x1="155" y1="275" x2="1665" y2="275" stroke="#ffffff" stroke-width="2.2" stroke-dasharray="18,14"/>',
+        # Pista inferior RWY 16R / 34L (y=885)
+        '<line x1="90" y1="885" x2="1620" y2="885" stroke="#334155" stroke-width="28" stroke-linecap="butt"/>',
+        '<line x1="105" y1="885" x2="1605" y2="885" stroke="#ffffff" stroke-width="2.2" stroke-dasharray="18,14"/>',
+    ]
     labels = [
-        ("16L", 124.9, 424.2, "rwy-end"),
-        ("34R", 912.3, 143.9, "rwy-end"),
-        ("16R", 53.7, 916.7, "rwy-end"),
-        ("34L", 837.0, 590.9, "rwy-end"),
-        ("RWY 16L / 34R", 445.6, 318.2, "rwy-name"),
-        ("RWY 16R / 34L", 435.5, 765.2, "rwy-name"),
-        ("L", 214.9, 507.6, "twy"),
-        ("L1", 117.8, 500.0, "twy"),
-        ("L3", 309.8, 409.1, "twy"),
-        ("L4", 537.0, 301.5, "twy"),
-        ("L5", 606.7, 272.7, "twy"),
-        ("L7", 924.9, 128.8, "twy"),
-        ("A", 254.9, 303.0, "twy"),
-        ("B", 396.3, 290.9, "twy"),
-        ("C", 546.8, 233.3, "twy"),
-        ("D", 593.3, 207.6, "twy"),
-        ("E", 659.1, 183.3, "twy"),
-        ("F", 815.9, 69.7, "twy"),
-        ("G", 714.3, 150.0, "twy"),
-        ("Q", 419.3, 540.9, "twy"),
-        ("R", 449.8, 533.3, "twy"),
-        ("R1", 423.5, 489.4, "twy"),
-        ("R2", 443.7, 590.9, "twy"),
-        ("M", 478.7, 389.4, "twy"),
-        ("M1", 535.2, 354.5, "twy"),
-        ("M2", 634.2, 304.5, "twy"),
-        ("M3", 694.8, 278.8, "twy"),
-        ("M4", 783.7, 239.4, "twy"),
-        ("U", 524.6, 621.2, "twy"),
-        ("U1", 588.1, 610.6, "twy"),
-        ("U2", 689.1, 578.8, "twy"),
-        ("U3", 756.8, 548.5, "twy"),
-        ("V", 535.9, 647.0, "twy"),
-        ("V1", 13.6, 900.0, "twy"),
-        ("V2", 159.1, 850.0, "twy"),
-        ("V3", 616.6, 648.5, "twy"),
-        ("V5", 828.7, 551.5, "twy"),
-        ("T BLUE", 641.0, 553.0, "apn"),
-        ("TERMINAL", 645.1, 484.8, "term"),
-        ("TERMINAL 1", 624.9, 36.4, "term"),
-        ("APN 100s", 725.1, 268.2, "apn"),
-        ("APN 200s", 745.3, 497.0, "apn"),
-        ("APN 300s", 522.1, 474.2, "apn"),
-        ("APN 400s", 543.3, 540.9, "apn"),
-        ("APN 500s", 548.4, 384.8, "apn"),
-        ("APN 600s", 586.7, 571.2, "apn"),
+        ("16L", 86, 283, "rwy-end"), ("34R", 1694, 283, "rwy-end"),
+        ("16R", 36, 893, "rwy-end"), ("34L", 1634, 893, "rwy-end"),
+        ("RWY 16L / 34R", 630, 255, "rwy-name"),
+        ("RWY 16R / 34L", 610, 864, "rwy-name"),
+        ("A", 222, 200, "twy"), ("B", 502, 200, "twy"), ("C", 792, 200, "twy"),
+        ("D", 998, 200, "twy"), ("E", 1235, 200, "twy"), ("G", 1435, 200, "twy"), ("F", 1652, 200, "twy"),
+        ("L1", 168, 330, "twy"), ("L", 310, 352, "twy"), ("L3", 490, 330, "twy"),
+        ("L4", 890, 330, "twy"), ("L5", 995, 344, "twy"), ("L7", 1672, 330, "twy"),
+        ("Q", 652, 585, "twy"), ("R1", 766, 412, "twy"), ("R", 766, 585, "twy"), ("R2", 766, 705, "twy"),
+        ("M", 815, 430, "twy"),
+        ("M1", 942, 515, "gate"), ("M2", 1158, 515, "gate"), ("M3", 1372, 515, "gate"), ("M4", 1588, 515, "gate"),
+        ("U", 815, 715, "twy"),
+        ("U1", 984, 665, "gate"), ("U2", 1218, 665, "gate"), ("U3", 1452, 665, "gate"),
+        ("V1", 118, 852, "twy"), ("V2", 400, 852, "twy"), ("V", 560, 790, "twy"),
+        ("V3", 1140, 770, "twy"), ("V5", 1612, 770, "twy"),
     ]
-    out = []
-    for txt, nx, ny, cls in labels:
-        x, y = nx * 1.8, ny * 1.2
-        out.append(f'<text x="{x:.1f}" y="{y:.1f}" class="lbl-{cls}">{html.escape(txt)}</text>')
-    return "\n".join(out)
+    for txt, x, y, cls in labels:
+        parts.append(f'<text x="{x}" y="{y}" class="lbl-{cls}">{html.escape(txt)}</text>')
+
+    if include_proc_pins:
+        pins = [
+            ("P1", 160, 360, 18, 26),
+            ("P2", 1010, 238, 16, -6),
+            ("P2", 1030, 322, 16, -4),
+            ("P3", 145, 275, -36, -18),
+            ("P3", 1660, 238, 16, -4),
+        ]
+        for lbl, px, py, dx, dy in pins:
+            parts.append(
+                f'<circle cx="{px}" cy="{py}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+                f'<text x="{px+dx}" y="{py+dy}" class="pin-lbl">{lbl}</text>'
+            )
+    return "\n".join(parts)
 
 
-def build_spjc_proc_pins():
-    """Pines azules de procedimientos P1, P2, P3 sobre SPJC."""
-    pins = [
-        ("P1", 136 * 1.8, 514 * 1.2, 22, 6),
-        ("P2", 615 * 1.8, 228 * 1.2, 18, -10),
-        ("P2", 603 * 1.8, 191 * 1.2, 18, -10),
-        ("P3", 107 * 1.8, 434 * 1.2, -32, -8),
-        ("P3", 928 * 1.8, 108 * 1.2, 16, -6),
-    ]
-    out = []
-    for lbl, x, y, dx, dy in pins:
-        out.append(
-            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
-            f'<text x="{x+dx:.1f}" y="{y+dy:.1f}" class="pin-lbl">{lbl}</text>'
-        )
-    return "\n".join(out)
+def floating_card_html(nid, title, body, sched, tone, badge, cx, cy, cw, vw=1800.0, vh=1180.0):
+    b_html = f'<span class="badge-new">{html.escape(badge)}</span>' if badge else ""
+    left_pct = (cx / vw) * 100.0
+    top_pct = (cy / vh) * 100.0
+    width_pct = (cw / vw) * 100.0
+    return f"""
+    <div class="mcard mcard-{tone} fcard" style="left:{left_pct:.2f}%; top:{top_pct:.2f}%; width:{width_pct:.2f}%;">
+      <div class="mcard-head">
+        <a href="#{anchor_id(nid)}" class="notam-link">{html.escape(nid)}</a>
+        <span class="mcard-title">· {html.escape(title)}</span>
+        {b_html}
+      </div>
+      <div class="mcard-body">{html.escape(body)}</div>
+      <div class="mcard-sched">{html.escape(sched)}</div>
+    </div>
+    """
 
 
-def render_spjc_day_svg(active, bg_uri):
+def render_spjc_day_canvas(active, day_cards, today_date, cutoff_local_dt):
     overlays = []
-    # A3730/26: RWY 16L/34R no disponible 12:30-14:30 y 16:00-17:30 local
-    if "A3730/26" in active:
-        overlays.append(
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="26" stroke-opacity="0.45" stroke-linecap="butt"/>'
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="6" stroke-dasharray="18,10"/>'
-            '<line x1="510" y1="0" x2="620" y2="415" stroke="#c53929" stroke-width="2.2"/>'
-        )
-    # A2863/26: TWY L entre L5 y L7 no disp. CAT D/E
+    fcards = []
     if "A2863/26" in active:
         overlays.append(
-            '<line x1="1125" y1="340" x2="1665" y2="178" stroke="#d97706" stroke-width="10" stroke-opacity="0.55" stroke-dasharray="12,8"/>'
+            '<line x1="1030" y1="360" x2="1660" y2="360" stroke="#d97706" stroke-width="12" stroke-opacity="0.7" stroke-dasharray="14,9"/>'
         )
-    # A3527/26: Senalizacion puntos de espera RWY 16L no disp. en TWY B, C, D, E, G
     if "A3527/26" in active:
-        for bx, by in [(705, 342), (975, 272), (1055, 248), (1185, 212), (1285, 182)]:
-            overlays.append(f'<circle cx="{bx}" cy="{by}" r="7" fill="#f59e0b" stroke="#78350f" stroke-width="2"/>')
-
-    return f"""
-    <svg viewBox="0 0 1800 1200" class="map-svg" xmlns="http://www.w3.org/2000/svg">
-      <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
-      {''.join(overlays)}
-      {build_spjc_proc_pins()}
-      {build_spjc_svg_base_labels()}
-    </svg>
-    """
-
-
-def render_spjc_night_svg(active, bg_uri, top_items=None, bot_items=None):
-    overlays = []
-    top_items = top_items or []
-    bot_items = bot_items or []
-
-    def card_x(idx, cols_per_row):
-        col = idx % 5
-        return (col + 0.5) * (1800.0 / max(1, cols_per_row))
-
-    # Trazos longitudinales de pista / franja / calles M y U
-    if any("RWY 16R/34L CLSD" in extract_item_e(active[nid]["icaoMessage"]).upper() for nid, *_ in bot_items if nid in active):
+        for bx in (560, 850, 1010, 1180, 1380):
+            overlays.append(f'<circle cx="{bx}" cy="248" r="8" fill="#f59e0b" stroke="#78350f" stroke-width="2"/>')
+    if "A3730/26" in active:
         overlays.append(
-            '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="24" stroke-opacity="0.48"/>'
-            '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="5"/>'
-        )
-    if any("STRIP RWY 16R/34L" in extract_item_e(active[nid]["icaoMessage"]).upper() for nid, *_ in top_items if nid in active):
-        overlays.append(
-            '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-            '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-        )
-    if any(px < 1420 and py < 500 for _, _, _, _, _, (px, py) in top_items):
-        overlays.append(
-            '<line x1="822" y1="472" x2="1445" y2="288" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
-        )
-    if any(py < 900 for _, _, _, _, _, (px, py) in bot_items):
-        overlays.append(
-            '<line x1="840" y1="775" x2="1465" y2="592" stroke="#c53929" stroke-width="11" stroke-opacity="0.45" stroke-dasharray="14,8"/>'
+            '<line x1="140" y1="275" x2="1680" y2="275" stroke="#c53929" stroke-width="30" stroke-opacity="0.48"/>'
+            '<line x1="140" y1="275" x2="1680" y2="275" stroke="#c53929" stroke-width="5" stroke-dasharray="18,10"/>'
         )
 
-    # Líneas y pines exactos para cada tarjeta superior activa (grid fijo de 5 columnas)
-    for idx, (nid, _, _, _, tone, (px, py)) in enumerate(top_items):
-        tx = card_x(idx, 5 if len(top_items) > 5 else len(top_items))
-        col_str = "#d97706" if tone == "amber" else "#c53929"
-        overlays.append(f'<line x1="{tx:.1f}" y1="0" x2="{px}" y2="{py}" stroke="{col_str}" stroke-width="1.8" stroke-opacity="0.78"/>')
-        if py < 600:
-            overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="{col_str}" stroke="#ffffff" stroke-width="2.5"/>')
-
-    # Líneas y pines exactos para cada tarjeta inferior activa (auto-fit en una fila)
-    for idx, (nid, _, _, _, tone, (px, py)) in enumerate(bot_items):
-        tx = card_x(idx, min(5, len(bot_items)))
-        overlays.append(f'<line x1="{tx:.1f}" y1="1200" x2="{px}" y2="{py}" stroke="#c53929" stroke-width="1.8" stroke-opacity="0.78"/>')
-        if py < 950:
-            overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>')
-    # V3 (A3729/26) & V5 (A3725/26) inline pins
-    if "A3729/26" in active:
+    active_day = [c for c in day_cards if c[0] in active]
+    if active_day:
+        n = len(active_day)
+        cw = min(780.0, (1720.0 - (n - 1) * 24.0) / n)
+        for i, (nid, title, body, sched, tone) in enumerate(active_day):
+            cx = 40.0 + i * (cw + 24.0)
+            cy = 18.0
+            ax = cx + cw * 0.5
+            badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
+            fcards.append(floating_card_html(nid, title, body, sched, tone, badge, cx, cy, cw))
+            overlays.append(f'<line x1="{ax:.1f}" y1="165" x2="{ax:.1f}" y2="275" stroke="#c53929" stroke-width="2.4"/>')
+    else:
+        # Nota limpia cuando no hay cierres diurnos adicionales a los procedimientos permanentes
         overlays.append(
-            '<circle cx="1115" cy="795" r="9" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
-        )
-    if "A3725/26" in active:
-        overlays.append(
-            '<circle cx="1485" cy="680" r="9" fill="#c53929" stroke="#ffffff" stroke-width="2.5"/>'
+            '<rect x="780" y="535" width="940" height="86" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>'
+            '<text x="1250" y="574" text-anchor="middle" font-size="22" font-weight="700" fill="#1e3a8a">Sin cierres diurnos de pista/TWY activos en este bloque</text>'
+            '<text x="1250" y="604" text-anchor="middle" font-size="18" fill="#475569">Aplican los procedimientos permanentes P1, P2, P3 y restricciones de la banda inferior.</text>'
         )
 
     return f"""
-    <svg viewBox="0 0 1800 1200" class="map-svg" xmlns="http://www.w3.org/2000/svg">
-      <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
-      {''.join(overlays)}
-      {build_spjc_proc_pins()}
-      {build_spjc_svg_base_labels()}
-    </svg>
+    <div class="canvas-wrap" style="aspect-ratio: 1800 / 1180;">
+      <svg viewBox="0 0 1800 1180" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
+        {build_spjc_schematic_base(include_proc_pins=True)}
+        {''.join(overlays)}
+      </svg>
+      {''.join(fcards)}
+    </div>
     """
 
 
-def render_spzo_svg(active, bg_uri):
+def render_spjc_night_canvas(active, top_items, mid_items, bot_items, today_date, cutoff_local_dt):
     overlays = []
-    has_3707 = "A3707/26" in active
-    # A3740/26: Prohibido giro 180 en RWY 10/28 (tarjeta izquierda)
-    if "A3740/26" in active:
-        x_card_3740 = 330 if has_3707 else 500
-        overlays.append(
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#d97706" stroke-width="22" stroke-opacity="0.38"/>'
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#c53929" stroke-width="4" stroke-dasharray="16,10"/>'
-            f'<line x1="{x_card_3740}" y1="0" x2="{x_card_3740}" y2="68" stroke="#c53929" stroke-width="2.5"/>'
-        )
-    # A3707/26: Parte de TWY C cerrada hasta antes de D (solo si esta vigente)
-    if has_3707:
-        overlays.append(
-            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="18" stroke-opacity="0.48" stroke-linecap="round"/>'
-            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="4" stroke-dasharray="12,7"/>'
-            '<line x1="1000" y1="0" x2="595" y2="144" stroke="#c53929" stroke-width="2.2"/>'
-        )
-    # A3711/26: Depresion de pavimento inicio de TWY C (x=527, y=148 sobre TWY C)
-    if "A3711/26" in active:
-        x_card_3711 = 1660 if has_3707 else 1500
-        overlays.append(
-            '<circle cx="527" cy="148" r="10" fill="#d97706" stroke="#ffffff" stroke-width="2.5"/>'
-            f'<line x1="{x_card_3711}" y1="0" x2="537" y2="144" stroke="#b45309" stroke-width="2.0"/>'
-        )
+    fcards = []
 
-    labels = [
-        ("10", 45.6 * 2.0, 198.1 * 0.29, "rwy-end"),
-        ("28", 934.5 * 2.0, 198.1 * 0.29, "rwy-end"),
-        ("RWY 10 / 28", 669.5 * 2.0, 204.0 * 0.29, "rwy-name"),
-        ("D", 203.7 * 2.0, 380.5 * 0.29, "twy"),
-        ("C", 263.5 * 2.0, 492.2 * 0.29, "twy"),
-        ("B", 392.6 * 2.0, 380.5 * 0.29, "twy"),
-        ("A", 469.5 * 2.0, 386.4 * 0.29, "twy"),
-        ("TERMINAL", 390.9 * 2.0, 798.1 * 0.29, "term"),
+    # Resaltados sobre el esquema para pistas, franja y calles cerradas
+    all_night = top_items + mid_items + bot_items
+    for nid, _, _, _, tone, _ in all_night:
+        u = extract_item_e(active[nid]["icaoMessage"]).upper()
+        if "RWY 16R/34L CLSD" in u:
+            overlays.append(
+                '<line x1="90" y1="885" x2="1620" y2="885" stroke="#c53929" stroke-width="30" stroke-opacity="0.5"/>'
+                '<line x1="90" y1="885" x2="1620" y2="885" stroke="#c53929" stroke-width="5"/>'
+            )
+        elif "STRIP RWY 16R/34L" in u:
+            overlays.append(
+                '<rect x="82" y="850" width="1546" height="70" fill="none" stroke="#d97706" stroke-width="4.5" stroke-dasharray="14,9" rx="4"/>'
+            )
+        elif "BTN TWY R TO TWY M1" in u or "GATE TRANSFER M1" in u:
+            overlays.append('<line x1="755" y1="440" x2="970" y2="440" stroke="#c53929" stroke-width="16" stroke-opacity="0.65"/>')
+        elif "BTN TWY M1 TO TWY M2" in u:
+            overlays.append('<line x1="970" y1="440" x2="1185" y2="440" stroke="#c53929" stroke-width="16" stroke-opacity="0.65"/>')
+        elif "BTN TWY M2 TO TWY M3" in u:
+            overlays.append('<line x1="1185" y1="440" x2="1400" y2="440" stroke="#c53929" stroke-width="16" stroke-opacity="0.65"/>')
+        elif "BTN TWY M3 TO TWY M4" in u:
+            overlays.append('<line x1="1400" y1="440" x2="1615" y2="440" stroke="#c53929" stroke-width="16" stroke-opacity="0.65"/>')
+
+    def place_band(items, x_min, x_max, cy, line_y_start, draw_pin=True):
+        if not items:
+            return
+        items_sorted = sorted(items, key=lambda it: it[5][0])
+        n = len(items_sorted)
+        gap = 16.0
+        avail = x_max - x_min
+        cw = min(420.0, (avail - (n - 1) * gap) / n)
+        total_w = n * cw + (n - 1) * gap
+        start_x = x_min + (avail - total_w) * 0.5
+        for i, (nid, title, body, sched, tone, (px, py)) in enumerate(items_sorted):
+            cx = start_x + i * (cw + gap)
+            ax = cx + cw * 0.5
+            col_str = "#d97706" if tone == "amber" else "#c53929"
+            badge = "NUEVO" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
+            fcards.append(floating_card_html(nid, title, body, sched, tone, badge, cx, cy, cw))
+            overlays.append(
+                f'<line x1="{ax:.1f}" y1="{line_y_start:.1f}" x2="{px:.1f}" y2="{py:.1f}" stroke="{col_str}" stroke-width="2.5" stroke-opacity="0.88"/>'
+            )
+            if draw_pin:
+                overlays.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="10" fill="{col_str}" stroke="#ffffff" stroke-width="2.8"/>')
+
+    # Banda 1 (arriba x=360..1785, cy=12): tramos de TWY M -> apuntan directo abajo hacia TWY M (y=440)
+    place_band(top_items, 360.0, 1785.0, cy=12.0, line_y_start=168.0, draw_pin=True)
+    # Banda 2 (centro x=780..1785, cy=528): puertas M1..M4 -> apuntan 36px directo ARRIBA hacia M1..M4 (y=492)
+    place_band(mid_items, 780.0, 1785.0, cy=528.0, line_y_start=528.0, draw_pin=True)
+    # Banda 3 (abajo x=15..1785, cy=960): RWY 16R/34L, Franja 16R y puertas U2/U3 -> apuntan directo ARRIBA
+    place_band(bot_items, 15.0, 1785.0, cy=960.0, line_y_start=960.0, draw_pin=True)
+
+    return f"""
+    <div class="canvas-wrap" style="aspect-ratio: 1800 / 1180;">
+      <svg viewBox="0 0 1800 1180" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
+        {build_spjc_schematic_base(include_proc_pins=False)}
+        {''.join(overlays)}
+      </svg>
+      {''.join(fcards)}
+    </div>
+    """
+
+
+def render_spzo_canvas(active, spzo_specs, today_date, cutoff_local_dt):
+    """Plano esquemático limpio de CUSCO · SPZO (viewBox 0 0 1800 560) con tarjetas sobre cada zona."""
+    twy_col = "#cbd5e1"
+    twy_bdr = "#94a3b8"
+    base = [
+        '<rect x="0" y="0" width="1800" height="560" fill="#f8fafc"/>',
+        # Franja de pista referencial
+        '<rect x="95" y="162" width="1610" height="106" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="12,8" rx="4"/>',
+        # Calles de rodaje D, C (paralela), B y A
+        f'<path d="M 145 215 L 145 345 L 830 345" fill="none" stroke="{twy_bdr}" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>',
+        f'<line x1="440" y1="215" x2="440" y2="345" stroke="{twy_col}" stroke-width="16"/>',
+        f'<line x1="830" y1="215" x2="830" y2="405" stroke="{twy_col}" stroke-width="18"/>',
+        f'<line x1="1060" y1="215" x2="885" y2="405" stroke="{twy_col}" stroke-width="18" stroke-linecap="round"/>',
+        '<rect x="680" y="405" width="260" height="44" rx="5" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>',
+        # Pista RWY 10 / 28 (y=215)
+        '<line x1="110" y1="215" x2="1690" y2="215" stroke="#334155" stroke-width="32"/>',
+        '<line x1="130" y1="215" x2="1670" y2="215" stroke="#ffffff" stroke-width="2.5" stroke-dasharray="20,14"/>',
     ]
-    lbl_svg = "\n".join(
-        f'<text x="{x:.1f}" y="{y:.1f}" class="lbl-spzo-{cls}">{html.escape(txt)}</text>'
-        for txt, x, y, cls in labels
-    )
+    labels = [
+        ("10", 62, 224, "spzo-rwy-end"), ("28", 1710, 224, "spzo-rwy-end"),
+        ("RWY 10 / 28", 1180, 192, "spzo-rwy-name"),
+        ("D", 412, 290, "spzo-twy"), ("C", 615, 333, "spzo-twy"),
+        ("B", 800, 290, "spzo-twy"), ("A", 995, 295, "spzo-twy"),
+        ("PLATAFORMA", 755, 434, "spzo-term"),
+    ]
+    for txt, x, y, cls in labels:
+        base.append(f'<text x="{x}" y="{y}" class="lbl-{cls}">{html.escape(txt)}</text>')
+
+    overlays = []
+    fcards = []
+    if "A3740/26" in active:
+        overlays.append(
+            '<line x1="110" y1="215" x2="1690" y2="215" stroke="#d97706" stroke-width="32" stroke-opacity="0.38"/>'
+            '<line x1="110" y1="215" x2="1690" y2="215" stroke="#c53929" stroke-width="4.5" stroke-dasharray="16,10"/>'
+        )
+    if "A3707/26" in active:
+        overlays.append(
+            '<line x1="440" y1="345" x2="720" y2="345" stroke="#c53929" stroke-width="20" stroke-opacity="0.55"/>'
+        )
+
+    for spec in spzo_specs:
+        if not spec:
+            continue
+        nid, title, body, sched, tone = spec
+        if nid not in active:
+            continue
+        badge = "NUEVO HOY" if is_red_notam(active[nid], today_date, cutoff_local_dt) else None
+        if "RWY" in title.upper():
+            cx, cy, cw = 420.0, 16.0, 960.0
+            ax, ay, px, py = 900.0, 128.0, 900.0, 215.0
+        elif nid == "A3707/26":
+            cx, cy, cw = 980.0, 415.0, 720.0
+            ax, ay, px, py = 1340.0, 415.0, 580.0, 345.0
+        else:
+            # A3711/26 inicio de TWY C (x=475, y=345), a la izquierda de PLATAFORMA sin solapar
+            cx, cy, cw = 100.0, 412.0, 545.0
+            ax, ay, px, py = 475.0, 412.0, 475.0, 345.0
+        col_str = "#d97706" if tone == "amber" else "#c53929"
+        fcards.append(floating_card_html(nid, title, body, sched, tone, badge, cx, cy, cw, vw=1800.0, vh=560.0))
+        overlays.append(
+            f'<line x1="{ax:.1f}" y1="{ay:.1f}" x2="{px:.1f}" y2="{py:.1f}" stroke="{col_str}" stroke-width="3"/>'
+            f'<circle cx="{px:.1f}" cy="{py:.1f}" r="11" fill="{col_str}" stroke="#ffffff" stroke-width="3"/>'
+        )
+
     return f"""
-    <svg viewBox="0 0 2000 290" class="spzo-svg" xmlns="http://www.w3.org/2000/svg">
-      <image href="{bg_uri}" x="0" y="0" width="2000" height="290"/>
-      {''.join(overlays)}
-      {lbl_svg}
-    </svg>
+    <div class="canvas-wrap spzo-canvas" style="aspect-ratio: 1800 / 560;">
+      <svg viewBox="0 0 1800 560" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
+        {''.join(base)}
+        {''.join(overlays)}
+      </svg>
+      {''.join(fcards)}
+    </div>
     """
 
 
@@ -1001,6 +1101,7 @@ def build_unified_report():
     }
     extra_spjc_day = []
     spjc_night_top_items = []
+    spjc_night_mid_items = []
     spjc_night_bot_items = []
     extra_spzo_cards = []
     for nid, n_obj in sorted(active.items(), key=lambda x: (str(x[1].get("facilityDesignator", "")), x[0])):
@@ -1015,6 +1116,8 @@ def build_unified_report():
             panel, title, body, sched, tone, pin_xy = classify_spjc_night_surface(n_obj)
             if panel == "top":
                 spjc_night_top_items.append((nid, title, body, sched, tone, pin_xy))
+            elif panel == "mid":
+                spjc_night_mid_items.append((nid, title, body, sched, tone, pin_xy))
             else:
                 spjc_night_bot_items.append((nid, title, body, sched, tone, pin_xy))
             continue
@@ -1175,7 +1278,7 @@ def build_unified_report():
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
     # =========================================================================
     cited_ids = []
-    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_top_items + spjc_night_bot_items + spjc_procs_spec:
+    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_top_items + spjc_night_mid_items + spjc_night_bot_items + spjc_procs_spec:
         if nid in active and nid not in cited_ids:
             cited_ids.append(nid)
     for spec in spzo_cards_spec + extra_spzo_cards:
@@ -1358,43 +1461,39 @@ def build_unified_report():
     letter-spacing: 0.3px;
   }}
 
-  /* Mapas SVG */
-  .map-wrap {{
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 3px;
-    overflow: hidden;
-    text-align: center;
-  }}
-  .map-svg {{
-    display: block;
+  /* Planos esquemáticos SVG + tarjetas flotantes sobre cada zona */
+  .canvas-wrap {{
+    position: relative;
     width: 100%;
-    height: auto;
-    margin: 0 auto;
-  }}
-  .spzo-wrap {{
-    background: #ffffff;
+    background: #f8fafc;
     border: 1px solid #cbd5e1;
     border-radius: 4px;
-    padding: 18px 8px;
+    overflow: hidden;
+  }}
+  .spzo-canvas {{
     margin-bottom: 10px;
   }}
-  .spzo-svg {{
+  .canvas-svg {{
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
   }}
-  .lbl-rwy-end {{ font-size: 24px; font-weight: 800; fill: #0f172a; }}
-  .lbl-rwy-name {{ font-size: 24px; font-weight: 800; fill: #1e293b; }}
-  .lbl-twy {{ font-size: 20px; font-weight: 700; fill: #334155; }}
-  .lbl-apn {{ font-size: 18px; font-weight: 700; fill: #475569; }}
-  .lbl-term {{ font-size: 21px; font-weight: 800; fill: #0f294a; }}
+  .fcard {{
+    position: absolute;
+    z-index: 5;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+    background: rgba(255, 255, 255, 0.96);
+  }}
+  .lbl-rwy-end {{ font-size: 26px; font-weight: 900; fill: #0f172a; }}
+  .lbl-rwy-name {{ font-size: 23px; font-weight: 800; fill: #1e293b; }}
+  .lbl-twy {{ font-size: 21px; font-weight: 800; fill: #334155; }}
+  .lbl-gate {{ font-size: 22px; font-weight: 900; fill: #0f294a; }}
   .pin-lbl {{ font-size: 26px; font-weight: 900; fill: #1d4ed8; stroke: #ffffff; stroke-width: 4px; paint-order: stroke; }}
 
-  .lbl-spzo-rwy-end {{ font-size: 22px; font-weight: 800; fill: #0f172a; }}
-  .lbl-spzo-rwy-name {{ font-size: 22px; font-weight: 800; fill: #1e293b; }}
-  .lbl-spzo-twy {{ font-size: 22px; font-weight: 800; fill: #0f294a; }}
-  .lbl-spzo-term {{ font-size: 22px; font-weight: 800; fill: #0f294a; }}
+  .lbl-spzo-rwy-end {{ font-size: 28px; font-weight: 900; fill: #0f172a; }}
+  .lbl-spzo-rwy-name {{ font-size: 24px; font-weight: 800; fill: #1e293b; }}
+  .lbl-spzo-twy {{ font-size: 24px; font-weight: 800; fill: #0f294a; }}
+  .lbl-spzo-term {{ font-size: 20px; font-weight: 800; fill: #475569; }}
 
   .legend-bar {{
     margin-bottom: 5px;
@@ -1575,14 +1674,9 @@ def build_unified_report():
     <div class="panel">
       <div class="panel-hdr">
         <span class="panel-title">DÍA | 07:00 – 19:00 HORA LOCAL</span>
-        <span class="panel-sub">Cierres/obras diurnas + procedimientos en superficie</span>
+        <span class="panel-sub">Pistas, calles de rodaje y procedimientos diurnos</span>
       </div>
-      <div class="cards-row-2">
-        {''.join(spjc_day_cards_html)}
-      </div>
-      <div class="map-wrap">
-        {render_spjc_day_svg(active, spjc_bg_uri)}
-      </div>
+      {render_spjc_day_canvas(active, spjc_day_cards_spec + extra_spjc_day, today_date, cutoff_local_dt)}
     </div>
 
     <!-- BLOQUE NOCHE -->
@@ -1591,15 +1685,7 @@ def build_unified_report():
         <span class="panel-title">NOCHE | 19:00 – 07:00 HORA LOCAL</span>
         <span class="panel-sub">Obras y cierres nocturnos programados (01:30–04:30 LOCAL)</span>
       </div>
-      <div class="cards-row-6">
-        {''.join(spjc_night_top_html)}
-      </div>
-      <div class="map-wrap">
-        {render_spjc_night_svg(active, spjc_bg_uri, spjc_night_top_items, spjc_night_bot_items)}
-      </div>
-      <div class="cards-row-5">
-        {''.join(spjc_night_bot_html)}
-      </div>
+      {render_spjc_night_canvas(active, spjc_night_top_items, spjc_night_mid_items, spjc_night_bot_items, today_date, cutoff_local_dt)}
     </div>
   </div>
 
@@ -1633,13 +1719,7 @@ def build_unified_report():
     <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Geometría manual referencial sobre AD 2 SPZO 09</div>
   </div>
 
-  <div class="cards-row-3">
-    {''.join(spzo_cards_html)}
-  </div>
-
-  <div class="spzo-wrap">
-    {render_spzo_svg(active, spzo_bg_uri)}
-  </div>
+  {render_spzo_canvas(active, spzo_cards_spec + extra_spzo_cards, today_date, cutoff_local_dt)}
 
   <div class="spzo-note">
     <strong>Observaciones operacionales SPZO:</strong> {spzo_obs_html}
