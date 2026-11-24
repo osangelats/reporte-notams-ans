@@ -694,25 +694,28 @@ def render_spjc_night_svg(active, bg_uri):
 
 def render_spzo_svg(active, bg_uri):
     overlays = []
-    # A3740/26 (o A3712/26): Prohibido giro 180 en RWY 10/28
+    has_3707 = "A3707/26" in active
+    # A3740/26: Prohibido giro 180 en RWY 10/28 (tarjeta izquierda)
     if "A3740/26" in active:
+        x_card_3740 = 330 if has_3707 else 500
         overlays.append(
             '<line x1="75" y1="68" x2="1868" y2="75" stroke="#d97706" stroke-width="22" stroke-opacity="0.38"/>'
             '<line x1="75" y1="68" x2="1868" y2="75" stroke="#c53929" stroke-width="4" stroke-dasharray="16,10"/>'
-            '<line x1="330" y1="0" x2="330" y2="68" stroke="#c53929" stroke-width="2.5"/>'
+            f'<line x1="{x_card_3740}" y1="0" x2="{x_card_3740}" y2="68" stroke="#c53929" stroke-width="2.5"/>'
         )
-    # A3707/26: Parte de TWY C cerrada hasta antes de D
-    if "A3707/26" in active:
+    # A3707/26: Parte de TWY C cerrada hasta antes de D (solo si esta vigente)
+    if has_3707:
         overlays.append(
             '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="18" stroke-opacity="0.48" stroke-linecap="round"/>'
             '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="4" stroke-dasharray="12,7"/>'
             '<line x1="1000" y1="0" x2="595" y2="144" stroke="#c53929" stroke-width="2.2"/>'
         )
-    # A3711/26: Depresion de pavimento inicio de TWY C
+    # A3711/26: Depresion de pavimento inicio de TWY C (x=527, y=148 sobre TWY C)
     if "A3711/26" in active:
+        x_card_3711 = 1660 if has_3707 else 1500
         overlays.append(
-            '<circle cx="715" cy="152" r="10" fill="#d97706" stroke="#ffffff" stroke-width="2.5"/>'
-            '<line x1="1660" y1="0" x2="723" y2="148" stroke="#b45309" stroke-width="2.0"/>'
+            '<circle cx="527" cy="148" r="10" fill="#d97706" stroke="#ffffff" stroke-width="2.5"/>'
+            f'<line x1="{x_card_3711}" y1="0" x2="537" y2="144" stroke="#b45309" stroke-width="2.0"/>'
         )
 
     labels = [
@@ -1082,6 +1085,20 @@ def build_unified_report():
         ("A3707/26", "Parte de TWY C", "Cierre por obras hasta antes de TWY D (trazo de sector aproximado; zona señalizada).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
         ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
     ]
+    spzo_obs_parts = []
+    if "A3740/26" in active:
+        spzo_obs_parts.append(
+            f'El NOTAM <a href="#{anchor_id("A3740/26")}" class="tbl-link"><strong>A3740/26</strong></a> prohíbe el giro de 180° en toda la pista <strong>RWY 10/28</strong> para evitar deterioro de la capa asfáltica (no declara cierre de RWY).'
+        )
+    if "A3707/26" in active:
+        spzo_obs_parts.append(
+            f'En <strong>TWY C</strong>, se representa el cierre parcial por obras (<a href="#{anchor_id("A3707/26")}" class="tbl-link"><strong>A3707/26</strong></a>).'
+        )
+    if "A3711/26" in active:
+        spzo_obs_parts.append(
+            f'En el inicio de <strong>TWY C</strong>, mantener precaución por depresión de pavimento señalizada (<a href="#{anchor_id("A3711/26")}" class="tbl-link"><strong>A3711/26</strong></a>).'
+        )
+    spzo_obs_html = " ".join(spzo_obs_parts) if spzo_obs_parts else "Sin afectaciones activas en el área de movimiento SPZO."
     spzo_cards_html = []
     for spec in spzo_cards_spec + extra_spzo_cards:
         if spec:
@@ -1263,7 +1280,7 @@ def build_unified_report():
   .cards-row-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px; }}
   .cards-row-6 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-bottom: 2.5px; }}
   .cards-row-5 {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5px; margin-top: 2.5px; }}
-  .cards-row-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }}
+  .cards-row-3 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-bottom: 8px; }}
   .procs-strip {{
     margin-top: 4px;
     border-top: 1.2px solid #cbd5e1;
@@ -1591,7 +1608,7 @@ def build_unified_report():
   </div>
 
   <div class="spzo-note">
-    <strong>Observaciones operacionales SPZO:</strong> El NOTAM <a href="#{anchor_id('A3740/26')}" class="tbl-link"><strong>A3740/26</strong></a> (publicado hoy 20/11 a las 17:31 local) reemplaza al anterior A3712/26, ampliando la prohibición de giro de 180° a toda la pista <strong>RWY 10/28</strong> para evitar deterioro de la capa asfáltica (no declara cierre de pista). En <strong>TWY C</strong>, se representa el sector afectado por cierre parcial por obras (<a href="#{anchor_id('A3707/26')}" class="tbl-link"><strong>A3707/26</strong></a>) y la depresión de pavimento señalizada al inicio de la calle (<a href="#{anchor_id('A3711/26')}" class="tbl-link"><strong>A3711/26</strong></a>); los límites métricos exactos están sujetos a la señalización en campo.
+    <strong>Observaciones operacionales SPZO:</strong> {spzo_obs_html}
   </div>
 
   <div class="legend-bar" style="margin-top: 16px;">
