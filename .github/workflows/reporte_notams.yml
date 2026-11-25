@@ -2,34 +2,13 @@ name: Reporte Diario NOTAMs ANS
 
 on:
   schedule:
-    # Lunes a viernes a las 09:00 de Lima (UTC-5): 14:00 UTC.
-    # GitHub Actions puede iniciar la ejecución con retraso por disponibilidad.
-    - cron: '0 14 * * 1-5'
-    # Prueba del 25 NOV 2026 a las 17:50 de Lima (22:50 UTC).
-    - cron: '50 22 25 11 *'
-  # Permite ejecutarlo manualmente en cualquier momento desde tu celular o PC
+    # Respaldo Lunes a Viernes ~9:00 AM hora Lima (13:53 UTC); disparo principal puntual desde Google Apps Script
+    - cron: '53 13 * * 1-5'
+  # Permite ejecutarlo manualmente o desde Google Apps Script en cualquier momento
   workflow_dispatch:
 
 jobs:
-  validar-fecha:
-    runs-on: ubuntu-latest
-    outputs:
-      ejecutar: ${{ steps.fecha.outputs.ejecutar }}
-    steps:
-      - name: Limitar la prueba al 25 de noviembre de 2026
-        id: fecha
-        env:
-          HORARIO: ${{ github.event.schedule }}
-        run: |
-          if [[ "$HORARIO" == '50 22 25 11 *' && "$(date -u +%F)" != '2026-11-25' ]]; then
-            echo "ejecutar=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ejecutar=true" >> "$GITHUB_OUTPUT"
-          fi
-
   generar-reporte:
-    needs: validar-fecha
-    if: needs.validar-fecha.outputs.ejecutar == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Descargar repositorio
