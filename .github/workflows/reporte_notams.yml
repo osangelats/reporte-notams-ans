@@ -2,8 +2,8 @@ name: Reporte Diario NOTAMs ANS
 
 on:
   schedule:
-    # Lunes a Viernes a las 8:52 AM hora Lima (13:52 UTC, minuto sin congestion)
-    - cron: '52 13 * * 1-5'
+    # Lunes a Viernes a las 8:17 AM hora Lima (13:17 UTC) para absorber colas de GitHub antes de las 9:00 AM
+    - cron: '17 13 * * 1-5'
   # Permite ejecutarlo manualmente en cualquier momento desde tu celular o PC
   workflow_dispatch:
 
