@@ -793,10 +793,12 @@ def spjc_day_dynamic_overlays(active, day_cards):
         elif re.search(r"RWY\s+16R/34L\s+CLSD", u):
             out.append(f'<line x1="38" y1="1132" x2="1510" y2="704" stroke="{col}" stroke-width="20" stroke-opacity=".5" stroke-linecap="butt"/>')
             pos = (700, 1000, "Cierre 16R/34L", "")
+        elif "RWY 16L AVBL FOR LDG" in u and "MIL" in u:
+            pos = (900, 345, "Llegadas MIL/policía", "procedimiento")
         if pos:
             x, y, label, uncertainty = pos
             out.append(f'<circle cx="{x}" cy="{y}" r="12" fill="{col}" stroke="white" stroke-width="3"/>')
-            label_y = y - 65 if "TXL T BLUE" in u else y
+            label_y = y - 65 if ("TXL T BLUE" in u or ("RWY 16L AVBL FOR LDG" in u and "MIL" in u)) else y
             for offset, txt in enumerate((nid, label, uncertainty)):
                 if txt:
                     out.append(f'<text x="{x+18}" y="{label_y+offset*21}" font-size="19" font-weight="700" fill="{col}" stroke="white" stroke-width="4" paint-order="stroke">{html.escape(txt)}</text>')
@@ -816,27 +818,13 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
 
     active_day = [c for c in day_cards if c[0] in active]
     overlays.append(spjc_day_dynamic_overlays(active, active_day))
-    if active_day:
-        rows_html = []
-        for nid, title, body, sched, tone in active_day:
-            badge = '<span class="badge-new">NUEVO</span>' if is_red_notam(active[nid], today_date, cutoff_local_dt) else ""
-            rows_html.append(
-                f'<div class="uleg-item"><a href="#{anchor_id(nid)}" class="notam-link">{html.escape(nid)}</a>{badge} '
-                f'<strong>{html.escape(title)}:</strong> {html.escape(body)} <span class="uchip-dt">({html.escape(sched)})</span></div>'
-            )
-        legend_html = f"""
-        <div class="uleg-box">
-          <div class="uleg-hdr">AFECTACIONES DIURNAS PUBLICADAS · HORARIOS UTC</div>
-          <div class="uleg-list">{''.join(rows_html)}</div>
-        </div>
-        """
-    else:
-        legend_html = """
-        <div class="uleg-box uleg-box-blue">
-          <div class="uleg-hdr uleg-hdr-blue">ESTADO DIURNO (07:00 – 19:00 HL)</div>
-          <div class="uleg-empty">Sin otras afectaciones diurnas de superficie publicadas para este bloque. Aplican en el plano oficial las referencias azules <strong>P1, P2, P3</strong> y las limitaciones continuas (<strong>TWY L L5–L7</strong> y <strong>marcas 16L</strong>) detalladas en la banda inferior.</div>
-        </div>
-        """
+    # Todas las fichas se reúnen en la banda inferior y respetan su color.
+    legend_html = (
+        '<div class="uleg-box uleg-box-blue"><div class="uleg-empty">'
+        'Vigencias y horarios UTC: consultar las fichas de procedimientos y restricciones '
+        'en superficie de la banda inferior. Los puntos ámbar indican obras o limitaciones; '
+        'los puntos azules, procedimientos.</div></div>'
+    )
 
     return f"""
     <div class="canvas-wrap">
@@ -1318,6 +1306,10 @@ def build_unified_report():
     for nid, title, body, sched, tone in spjc_procs_spec:
         if nid in active:
             spjc_procs_html.append(card_link(nid, title, body, sched, tone))
+
+    # Las afectaciones diurnas dinámicas comparten la banda inferior con las continuas.
+    for nid, title, body, sched, tone in extra_spjc_day:
+        spjc_procs_html.append(card_link(nid, title, body, sched, tone))
 
     # Tarjetas CUSCO SPZO (Pagina 2)
     spzo_cards_spec = [
