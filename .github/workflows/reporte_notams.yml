@@ -4,8 +4,8 @@ on:
   schedule:
     # Lunes a Viernes a las 8:17 AM hora Lima (13:17 UTC) para absorber colas de GitHub antes de las 9:00 AM
     - cron: '17 13 * * 1-5'
-    # Prueba puntual de hoy miércoles a las 11:56 AM hora Lima (16:56 UTC) sin Antigravity
-    - cron: '56 16 * * 3'
+    # Prueba de hoy miércoles ~5:00 PM hora Lima (21:55 UTC = 4:55 PM Lima)
+    - cron: '55 21 * * 3'
   # Permite ejecutarlo manualmente en cualquier momento desde tu celular o PC
   workflow_dispatch:
 
