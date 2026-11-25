@@ -660,7 +660,7 @@ def build_spjc_svg_base_labels():
     return "\n".join(out)
 
 
-def build_spjc_proc_pins():
+def build_spjc_proc_pins(active=None):
     """Pines azules de procedimientos P1, P2, P3 sobre el plano oficial SPJC."""
     pins = [
         ("P1", 136 * 1.8, 514 * 1.2, 22, 6),
@@ -671,6 +671,9 @@ def build_spjc_proc_pins():
     ]
     out = []
     for lbl, x, y, dx, dy in pins:
+        ids = {"P1": ("A3523/26",), "P2": ("A2828/26", "A2830/26"), "P3": ("A2827/26",)}[lbl]
+        if active is not None and not any(nid in active for nid in ids):
+            continue
         out.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
             f'<text x="{x+dx:.1f}" y="{y+dy:.1f}" class="pin-lbl">{lbl}</text>'
@@ -678,13 +681,131 @@ def build_spjc_proc_pins():
     return "\n".join(out)
 
 
+
+def spjc_day_schedule(n_obj):
+    """Intersect D) and B)-C) with 12:00-24:00 UTC (07:00-19:00 Lima).
+    Return None when no published occurrence intersects the day block.
+    Unparsed calendars remain explicit instead of inventing daily recurrence.
+    """
+    start = parse_utc(n_obj.get("startDate"))
+    end = parse_utc(n_obj.get("endDate"))
+    d_raw = extract_item_d(n_obj.get("icaoMessage", "")).strip().upper()
+    pairs = re.findall(r"(\d{4})\s*-\s*(\d{4})", d_raw)
+    calendar = re.sub(r"\d{4}\s*-\s*\d{4}", "", d_raw)
+    simple = not re.sub(r"DAILY|DLY|[,;\s]", "", calendar)
+    if not simple:
+        return "D) UTC: " + d_raw + " · Calendario sin resolver; comprobar texto OACI"
+    slots = []
+    if pairs:
+        for a, b in pairs:
+            aa, bb = int(a[:2]) * 60 + int(a[2:]), int(b[:2]) * 60 + int(b[2:])
+            if aa > 1440 or bb > 1440 or int(a[2:]) > 59 or int(b[2:]) > 59:
+                return "D) UTC: " + d_raw + " · Horario pendiente de revisión"
+            for lo, hi in ([(aa, bb)] if bb > aa else [(aa, 1440), (0, bb)]):
+                lo, hi = max(lo, 720), min(hi, 1440)
+                if lo < hi:
+                    slots.append((lo, hi))
+        if not slots:
+            return None
+    else:
+        slots = [(720, 1440)]
+    # For dated notices, check real occurrences and clip to B)-C).
+    valid_slots = set()
+    if start and end and (end - start).days < 800:
+        day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        while day < end:
+            for lo, hi in slots:
+                left = max(start, day + timedelta(minutes=lo))
+                right = min(end, day + timedelta(minutes=hi))
+                if left < right:
+                    valid_slots.add((int((left-day).total_seconds()/60),
+                                     int((right-day).total_seconds()/60)))
+            day += timedelta(days=1)
+        if not valid_slots:
+            return None
+    else:
+        valid_slots.update(slots)
+    def hhmm(v):
+        return f"{v//60:02d}:{v%60:02d}"
+    windows = ", ".join(f"{hhmm(a)}-{hhmm(b)}" for a, b in sorted(valid_slots))
+    return (windows + " UTC") if d_raw else "Sin D): aplicación continua dentro de B)-C), limitada al bloque 12:00-24:00 UTC"
+
+
+def spjc_surface_style(n_obj):
+    u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
+    if re.search(r"\b(CLSD|CLOSED)\b", u):
+        return "red"
+    if re.search(r"\b(WIP|LTD|NOT AVBL|DEPRESSION|PAVEMENT)\b", u):
+        return "amber"
+    return "blue"
+
+
+def discover_spjc_day_cards(active, excluded_ids):
+    """Read all published SPJC surface notices; no issue-date cutoff or fixed NOTAM id."""
+    cards = []
+    for nid, n_obj in sorted(active.items()):
+        if nid in excluded_ids or str(n_obj.get("facilityDesignator", "")).upper() != "SPJC":
+            continue
+        u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
+        if not re.search(r"\b(RWY|TWY|TXL|APN|APRON|STAND|GATE\s+TRANSFER)\b", u):
+            continue
+        if re.search(r"\b(RPAS|BALLOON|GNSS|ILS|VOR|DME|PAPI|APAPI|BIRD|OBST|CRANES|PARACHUTE|FIRING)\b", u):
+            continue
+        slot = spjc_day_schedule(n_obj)
+        if slot is None:
+            continue
+        tone = spjc_surface_style(n_obj)
+        if "WIP" in u and "STRIP" in u and "16R" in u:
+            title, body = "Franja RWY 16R", "Obras en el lado derecho de la franja; precaución, zona señalizada. No declara cierre de pista."
+        elif "WIP" in u and "TWY V" in u and "V1" in u and "TWY Q" in u:
+            title, body = "Cercanías TWY V (V1-Q)", "Obras próximas a TWY V desde V1 hasta la intersección con Q; precaución, zona señalizada. No declara cierre de TWY V."
+        elif "RWY 16L AVBL FOR LDG" in u and "MIL" in u:
+            title, body = "RWY 16L - llegadas militares/policiales", "Disponible para aterrizajes de vuelos con destino a plataformas militares o policiales; procedimiento, no cierre."
+        elif "TXL T BLUE" in u:
+            title, body = "TXL T BLUE (601-202)", "Rodaje limitado por obras entre las referencias de puestos 601 y 202. No declara cierre de esos puestos."
+        else:
+            title, body = "Superficie SPJC", translate_icao_to_spanish(n_obj)
+        if not any(k in u for k in ("STRIP", "TWY V FM TWY V1", "TXL T BLUE", "RWY 16L AVBL FOR LDG", "RWY 16L/34R CLSD", "RWY 16R/34L CLSD")):
+            body += " Ubicación sin geometría verificada: consultar texto OACI."
+        start = parse_utc(n_obj.get("startDate"))
+        state = "PROGRAMADO · " if start and start > datetime.now(timezone.utc) else ""
+        validity = f"B) {n_obj.get('startDate', '')} / C) {n_obj.get('endDate', 'PERM')} UTC"
+        cards.append((nid, title, body, state + validity + " · " + slot, tone))
+    return cards
+
+
+def spjc_day_dynamic_overlays(active, day_cards):
+    out = []
+    for nid, title, body, sched, tone in day_cards:
+        u = extract_item_e(active[nid].get("icaoMessage", "")).upper()
+        col = {"red": "#c53929", "amber": "#b86b00", "blue": "#1d4ed8"}[tone]
+        pos = None
+        if "WIP" in u and "STRIP" in u and "16R" in u:
+            # Symbol only: the notice gives no surveyed perimeter/chainage.
+            pos = (920, 935, "Obras franja 16R", "sector aprox.")
+        elif "WIP" in u and "TWY V" in u and "V1" in u and "TWY Q" in u:
+            pos = (605, 925, "Obras cerca V1-Q", "sector aprox.")
+        elif "TXL T BLUE" in u:
+            pos = (1154, 664, "TXL T BLUE limitada", "límites aprox.")
+        elif re.search(r"RWY\s+16L/34R\s+CLSD", u):
+            out.append(f'<line x1="186" y1="548" x2="1658" y2="124" stroke="{col}" stroke-width="20" stroke-opacity=".5" stroke-linecap="butt"/>')
+            pos = (750, 390, "Cierre 16L/34R", "")
+        elif re.search(r"RWY\s+16R/34L\s+CLSD", u):
+            out.append(f'<line x1="38" y1="1132" x2="1510" y2="704" stroke="{col}" stroke-width="20" stroke-opacity=".5" stroke-linecap="butt"/>')
+            pos = (700, 1000, "Cierre 16R/34L", "")
+        if pos:
+            x, y, label, uncertainty = pos
+            out.append(f'<circle cx="{x}" cy="{y}" r="12" fill="{col}" stroke="white" stroke-width="3"/>')
+            label_y = y - 65 if "TXL T BLUE" in u else y
+            for offset, txt in enumerate((nid, label, uncertainty)):
+                if txt:
+                    out.append(f'<text x="{x+18}" y="{label_y+offset*21}" font-size="19" font-weight="700" fill="{col}" stroke="white" stroke-width="4" paint-order="stroke">{html.escape(txt)}</text>')
+    return "\n".join(out)
+
+
+
 def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_dt):
     overlays = []
-    if "A3730/26" in active:
-        overlays.append(
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="26" stroke-opacity="0.45" stroke-linecap="butt"/>'
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="6" stroke-dasharray="18,10"/>'
-        )
     if "A2863/26" in active:
         overlays.append(
             '<line x1="1125" y1="340" x2="1665" y2="178" stroke="#d97706" stroke-width="10" stroke-opacity="0.6" stroke-dasharray="12,8"/>'
@@ -694,6 +815,7 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
             overlays.append(f'<circle cx="{bx}" cy="{by}" r="7" fill="#f59e0b" stroke="#78350f" stroke-width="2"/>')
 
     active_day = [c for c in day_cards if c[0] in active]
+    overlays.append(spjc_day_dynamic_overlays(active, active_day))
     if active_day:
         rows_html = []
         for nid, title, body, sched, tone in active_day:
@@ -704,7 +826,7 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
             )
         legend_html = f"""
         <div class="uleg-box">
-          <div class="uleg-hdr">AFECTACIONES DIURNAS TEMPORALES</div>
+          <div class="uleg-hdr">AFECTACIONES DIURNAS PUBLICADAS · HORARIOS UTC</div>
           <div class="uleg-list">{''.join(rows_html)}</div>
         </div>
         """
@@ -712,7 +834,7 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
         legend_html = """
         <div class="uleg-box uleg-box-blue">
           <div class="uleg-hdr uleg-hdr-blue">ESTADO DIURNO (07:00 – 19:00 HL)</div>
-          <div class="uleg-empty">Sin cierres temporales diurnos de RWY/TWY activos hoy. Aplican en el plano oficial las referencias azules <strong>P1, P2, P3</strong> y las limitaciones continuas (<strong>TWY L L5–L7</strong> y <strong>marcas 16L</strong>) detalladas en la banda inferior.</div>
+          <div class="uleg-empty">Sin otras afectaciones diurnas de superficie publicadas para este bloque. Aplican en el plano oficial las referencias azules <strong>P1, P2, P3</strong> y las limitaciones continuas (<strong>TWY L L5–L7</strong> y <strong>marcas 16L</strong>) detalladas en la banda inferior.</div>
         </div>
         """
 
@@ -721,7 +843,7 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
       <svg viewBox="0 15 1800 1165" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
         <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
         {''.join(overlays)}
-        {build_spjc_proc_pins()}
+        {build_spjc_proc_pins(active)}
         {build_spjc_svg_base_labels()}
       </svg>
     </div>
@@ -816,7 +938,7 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
       <svg viewBox="0 15 1800 1165" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
         <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
         {''.join(overlays)}
-        {build_spjc_proc_pins()}
+        {build_spjc_proc_pins(active)}
         {build_spjc_svg_base_labels()}
       </svg>
     </div>
@@ -1189,6 +1311,9 @@ def build_unified_report():
         ("A3527/26", "Marcas 16L (B,C,D,E,G)", "Señalización puntos de espera 16L no disp. Reportar libre al ingresar total a A o F.", "Todo el día · Hasta 02/02/27", "amber"),
         ("A2863/26", "TWY L (L5-L7) CAT D/E", "No disponible para rodaje CAT D y E. RWY 34R disponible vía TWY F.", "Todo el día · Hasta 30/11", "amber"),
     ]
+    # Reconcile the left map independently of the table exclusions and historic ids.
+    extra_spjc_day = discover_spjc_day_cards(active, {c[0] for c in spjc_procs_spec})
+    spjc_day_cards_spec = []
     spjc_procs_html = []
     for nid, title, body, sched, tone in spjc_procs_spec:
         if nid in active:
