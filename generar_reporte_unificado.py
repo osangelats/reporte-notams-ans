@@ -810,7 +810,8 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
     overlays = []
     if "A2863/26" in active:
         overlays.append(
-            '<line x1="1125" y1="340" x2="1665" y2="178" stroke="#d97706" stroke-width="10" stroke-opacity="0.6" stroke-dasharray="12,8"/>'
+            '<circle cx="1395" cy="259" r="11" fill="#d97706" stroke="white" stroke-width="3"/>'
+            '<text x="1413" y="246" font-size="19" font-weight="700" fill="#b86b00" stroke="white" stroke-width="4" paint-order="stroke">A2863/26 · CAT D/E</text>'
         )
     if "A3527/26" in active:
         for bx, by in [(705, 342), (975, 272), (1055, 248), (1185, 212), (1285, 182)]:
@@ -856,9 +857,9 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
             has_rwy_clsd = True
         elif "STRIP RWY 16R/34L" in u:
             has_strip = True
-        elif cat in ("Tramos TWY M", "Puertas M1–M4"):
+        elif cat in ("Tramos TWY M", "Puertas M1–M4") and re.search(r"TWY M\b.*\bCLSD\b", u):
             has_twy_m = True
-        elif cat == "Puertas U":
+        elif cat == "Puertas U" and re.search(r"TWY U\b.*\bCLSD\b", u):
             has_twy_u = True
 
     if has_rwy_clsd:
@@ -868,8 +869,8 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
         )
     if has_strip:
         overlays.append(
-            '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-            '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
+            '<circle cx="920" cy="935" r="12" fill="#d97706" stroke="white" stroke-width="3"/>'
+            '<text x="938" y="950" font-size="19" font-weight="700" fill="#b86b00" stroke="white" stroke-width="4" paint-order="stroke">Obras franja 16R · sector aprox.</text>'
         )
     if has_twy_m:
         overlays.append(
@@ -939,12 +940,12 @@ def render_spzo_canvas(active, bg_uri, spzo_specs, today_date, cutoff_local_dt):
     overlays = []
     if "A3740/26" in active:
         overlays.append(
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#d97706" stroke-width="22" stroke-opacity="0.38"/>'
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#c53929" stroke-width="4" stroke-dasharray="16,10"/>'
+            '<circle cx="1150" cy="72" r="10" fill="#d97706" stroke="white" stroke-width="3"/>'
+            '<text x="1170" y="99" font-size="16" font-weight="700" fill="#b86b00" stroke="white" stroke-width="3" paint-order="stroke">A3740/26 · Prohibido giro 180°</text>'
         )
     if "A3707/26" in active:
         overlays.append(
-            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="18" stroke-opacity="0.48" stroke-linecap="round"/>'
+            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="18" stroke-opacity="0.48" stroke-linecap="butt"/>'
             '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="4" stroke-dasharray="12,7"/>'
         )
     if "A3711/26" in active:
