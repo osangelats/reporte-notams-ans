@@ -409,10 +409,65 @@ def extract_local_slot_spjc(n_obj):
     return "Horario publicado"
 
 
+def classify_spjc_day_surface(n_obj):
+    """
+    Clasifica dinámicamente cualquier NOTAM diurno del área de movimiento de SPJC:
+    - Cierres (CLSD): tono 'red', trazo de toda la superficie cerrada.
+    - Obras / precaución (WIP / CTN): tono 'orange', puntos naranjas aproximados.
+    - Procedimientos: tono 'blue', puntos azules aproximados.
+    """
+    u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
+    st_s = parse_utc(n_obj.get("startDate"))
+    en_s = parse_utc(n_obj.get("endDate"))
+    if st_s and en_s:
+        d1 = st_s.astimezone(LIMA_TZ).strftime("%d/%m")
+        d2 = en_s.astimezone(LIMA_TZ).strftime("%d/%m")
+        f_rng = d1 if d1 == d2 else f"{d1}–{d2}"
+    else:
+        f_rng = ""
+    slot = extract_local_slot_spjc(n_obj)
+
+    if "CLSD" in u:
+        if "16L/34R" in u:
+            return ("Cierres", "RWY 16L/34R cerrada", f_rng, slot, "red", "rwy_16l", [])
+        if "16R/34L" in u:
+            return ("Cierres", "RWY 16R/34L cerrada", f_rng, slot, "red", "rwy_16r", [])
+        return ("Cierres", translate_icao_to_spanish(n_obj), f_rng, slot, "red", "custom_clsd", [(900, 500)])
+
+    if "TWY V" in u and "V1" in u and "TWY Q" in u:
+        return (
+            "Obras en superficie",
+            "Cerca de TWY V (entre V1 e int. TWY Q) · zona señalizada",
+            f_rng,
+            slot,
+            "orange",
+            "pts",
+            [(160, 996), (450, 912), (740, 828)],
+        )
+    if "STRIP" in u and "16R" in u:
+        lado = "lado derecho de RWY 16R" if "RIGHT SIDE" in u else "RWY 16R/34L"
+        pts = [(380, 1060), (760, 950), (1140, 839)] if "RIGHT SIDE" in u else [(280, 1036), (760, 896), (1240, 756)]
+        return (
+            "Obras en superficie",
+            f"Franja {lado} · zona señalizada",
+            f_rng,
+            slot,
+            "orange",
+            "pts",
+            pts,
+        )
+    if "WIP" in u or "OBRA" in u or "DEPRESSION" in u or "CTN" in u:
+        pts = [(620, 422)] if "16L" in u else ([(650, 954)] if "16R" in u else [(950, 580)])
+        return ("Obras en superficie", translate_icao_to_spanish(n_obj), f_rng, slot, "orange", "pts", pts)
+
+    return ("Procedimientos", translate_icao_to_spanish(n_obj), f_rng, slot, "blue", "pts", [(900, 520)])
+
+
 def classify_spjc_night_surface(n_obj):
     """
-    Clasifica cualquier NOTAM nocturno de SPJC con etiqueta corta de zona, fecha resumida,
-    categoría para la leyenda unificada y coordenada exacta sobre el plano oficial SPJC (0..1800 x 0..1200).
+    Clasifica cualquier NOTAM nocturno de SPJC:
+    - Cierres (CLSD / NOT AVBL): tono 'red' y geometría de superficie completa cerrada.
+    - Obras (WIP sin cierre): tono 'orange' y puntos naranjas aproximados.
     """
     u = extract_item_e(n_obj.get("icaoMessage", "")).upper()
     st_s = parse_utc(n_obj.get("startDate"))
@@ -426,36 +481,41 @@ def classify_spjc_night_surface(n_obj):
     slot = extract_local_slot_spjc(n_obj)
 
     if "GATE TRANSFER U2" in u:
-        return ("Puertas U", "Puerta U2", f_rng, slot, "red", (1235, 675))
+        return ("Puertas U", "Puerta U2", f_rng, slot, "red", "seg", [(1220, 628, 1235, 676)])
     if "GATE TRANSFER U3" in u:
-        return ("Puertas U", "Puerta U3", f_rng, slot, "red", (1365, 636))
+        return ("Puertas U", "Puerta U3", f_rng, slot, "red", "seg", [(1350, 588, 1365, 636)])
     if "GATE TRANSFER U1" in u or ("V5" in u and "U1" in u):
-        return ("Puertas U", "U / U1 / V5", f_rng, slot, "red", (1058, 725))
+        return ("Puertas U", "U / U1 / V5", f_rng, slot, "red", "seg", [(840, 775, 1058, 728), (1043, 680, 1058, 728)])
     if "V3" in u:
-        return ("Puertas U", "TWY U y V3", f_rng, slot, "red", (1115, 795))
+        return ("Puertas U", "TWY U y V3", f_rng, slot, "red", "seg", [(1105, 750, 1122, 804)])
     if "RWY 16R/34L CLSD" in u:
-        return ("RWY / Franja 16R", "RWY 16R/34L cerrada", f_rng, slot, "red", (480, 1004))
+        return ("RWY / Franja 16R", "RWY 16R/34L cerrada", f_rng, slot, "red", "rwy_16r", [(38, 1132, 1510, 704)])
     if "STRIP RWY 16R/34L" in u:
-        return ("RWY / Franja 16R", "Franja 16R/34L (obras)", f_rng, slot, "amber", (1220, 758))
+        return ("RWY / Franja 16R", "Franja 16R/34L (obras)", f_rng, slot, "orange", "pts", [(280, 1036), (760, 896), (1240, 756)])
     if "GATE TRANSFER M1" in u:
-        return ("Puertas M1–M4", "TWY M (R–M1) + M1", f_rng, slot, "red", (965, 428))
+        segs = [(965, 428, 980, 476)]
+        if "BTN TWY R" in u:
+            segs.insert(0, (810, 476, 965, 428))
+        return ("Puertas M1–M4", "TWY M (R–M1) + M1", f_rng, slot, "red", "seg", segs)
     if "GATE TRANSFER M2" in u:
-        return ("Puertas M1–M4", "Puerta M2", f_rng, slot, "red", (1142, 372))
+        return ("Puertas M1–M4", "Puerta M2", f_rng, slot, "red", "seg", [(1142, 372, 1157, 420)])
     if "GATE TRANSFER M3" in u:
-        return ("Puertas M1–M4", "Puerta M3", f_rng, slot, "red", (1255, 338))
+        return ("Puertas M1–M4", "Puerta M3", f_rng, slot, "red", "seg", [(1255, 338, 1270, 386)])
     if "GATE TRANSFER M4" in u:
-        return ("Puertas M1–M4", "Puerta M4", f_rng, slot, "red", (1412, 292))
+        return ("Puertas M1–M4", "Puerta M4", f_rng, slot, "red", "seg", [(1412, 292, 1427, 340)])
     if "BTN TWY R TO TWY M1" in u:
-        return ("Tramos TWY M", "Tramo R–M1", f_rng, slot, "red", (910, 444))
+        return ("Tramos TWY M", "Tramo R–M1", f_rng, slot, "red", "seg", [(810, 476, 965, 428)])
     if "BTN TWY M1 TO TWY M2" in u:
-        return ("Tramos TWY M", "Tramo M1–M2", f_rng, slot, "red", (1055, 400))
+        return ("Tramos TWY M", "Tramo M1–M2", f_rng, slot, "red", "seg", [(965, 428, 1142, 372)])
     if "BTN TWY M2 TO TWY M3" in u:
-        return ("Tramos TWY M", "Tramo M2–M3", f_rng, slot, "red", (1200, 355))
+        return ("Tramos TWY M", "Tramo M2–M3", f_rng, slot, "red", "seg", [(1142, 372, 1255, 338)])
     if "BTN TWY M3 TO TWY M4" in u:
-        return ("Tramos TWY M", "Tramo M3–M4", f_rng, slot, "red", (1335, 315))
+        return ("Tramos TWY M", "Tramo M3–M4", f_rng, slot, "red", "seg", [(1255, 338, 1412, 292)])
+    if "WIP" in u and "CLSD" not in u:
+        return ("RWY / Franja 16R", translate_icao_to_spanish(n_obj), f_rng, slot, "orange", "pts", [(950, 580)])
     if "TWY M" in u:
-        return ("Tramos TWY M", "TWY M", f_rng, slot, "red", (870, 456))
-    return ("Puertas U", "TWY U / V", f_rng, slot, "red", (1150, 700))
+        return ("Tramos TWY M", "TWY M", f_rng, slot, "red", "seg", [(810, 476, 1412, 292)])
+    return ("Puertas U", "TWY U / V", f_rng, slot, "red", "seg", [(840, 775, 1365, 636)])
 
 
 def utc_hhmm_to_local_str(hhmm):
@@ -507,23 +567,27 @@ def format_d_schedule_local(d_str, start_utc_str):
 
 ACRONYM_TOKENS = [
     "A-CDM", "APAPI", "PAPI", "DME", "VOR", "ILS", "NDB", "GNSS",
-    "TWR", "TWY", "RWY", "ACFT", "TSA", "ATC", "FPL", "TMA", "ACC",
-    "AIP", "SUP", "IAC", "SID", "STAR", "VFR", "IFR", "AMSL", "AGL",
-    "TORA", "TODA", "ASDA", "LDA", "CAT", "GND", "NOTAM", "UTC",
-    "NM", "FT", "MHz", "U/S", "AD",
+    "TWR", "TWY", "RWY", "ACFT", "TSA", "TRA", "PJE", "ATC", "ATS",
+    "FPL", "TMA", "CTR", "ATZ", "AWY", "ACC", "AIP", "SUP", "IAC",
+    "SID", "STAR", "VFR", "IFR", "AMSL", "AGL", "TORA", "TODA",
+    "ASDA", "LDA", "CAT", "GND", "NOTAM", "UTC", "NM", "FT", "MHz",
+    "U/S", "AD",
 ]
 
 
 def preserve_acronyms(txt):
     """Mantiene en MAYÚSCULAS todos los acrónimos aeronáuticos y canales (ej. CH 90X)."""
+    txt = re.sub(r"(\d+(?:\.\d+)?)\s*(nm|ft)\b", lambda m: f"{m.group(1)} {m.group(2).upper()}", txt, flags=re.IGNORECASE)
     for acr in ACRONYM_TOKENS:
         txt = re.sub(rf"(?<![A-Za-z0-9]){re.escape(acr)}(?![A-Za-z0-9])", acr, txt, flags=re.IGNORECASE)
     txt = re.sub(r"\bch\s*([0-9]+[xy])\b", lambda m: f"CH {m.group(1).upper()}", txt, flags=re.IGNORECASE)
     txt = re.sub(r"\bmhz\b", "MHz", txt, flags=re.IGNORECASE)
-    txt = re.sub(r"\b(TWY|RWY)\s+([a-z0-9/]+)\b", lambda m: f"{m.group(1).upper()} {m.group(2).upper()}", txt, flags=re.IGNORECASE)
-    for tok in ("RNAV", "RNP", "AR", "FAF", "IAF", "IF", "MAPT", "JCL", "LPA", "SLS"):
+    txt = re.sub(r"\b(TWY|RWY|CTR|TMA|ATZ|AWY)\s+([a-z0-9/]+)\b", lambda m: f"{m.group(1).upper()} {m.group(2).upper()}", txt, flags=re.IGNORECASE)
+    for tok in ("RNAV", "RNP", "AR", "FAF", "IAF", "IF", "MAPT", "JCL", "LPA", "SLS", "IQT", "SPQT", "GRU42"):
         txt = re.sub(rf"(?<![A-Za-z0-9]){tok}(?![A-Za-z0-9])", tok, txt, flags=re.IGNORECASE)
-    txt = re.sub(r"\b([A-Za-z]{2}\d{3})\b", lambda m: m.group(1).upper(), txt)
+    for proper in ("Bergerie", "Iquitos", "Lima", "Cusco", "Piura", "Pisco", "Chiclayo", "Pucallpa", "Tarapoto"):
+        txt = re.sub(rf"\b{proper.lower()}\b", proper, txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\b([A-Za-z]{1,2}\d{3})\b", lambda m: m.group(1).upper(), txt)
     return txt
 
 
@@ -577,13 +641,22 @@ def translate_icao_to_spanish(n_obj):
 
     txt = e_raw
     txt = re.sub(r"\s*COORD:.*$", "", txt, flags=re.IGNORECASE).strip()
+    txt = re.sub(r"\s*RDO:.*$", "", txt, flags=re.IGNORECASE).strip()
     txt = re.sub(r"\s*F\)[^\n]*$", "", txt, flags=re.IGNORECASE).strip()
+    txt = re.sub(r"\.([A-Za-z])", r". \1", txt)
     abbrev_es = [
+        (r"^TRA\s+DEBIDO\s+A\b", "Área temporalmente reservada (TRA) debido a"),
+        (r"^TSA\s+DEBIDO\s+A\b", "Área temporalmente segregada (TSA) debido a"),
         (r"\bPOSS\b", "Posible"),
         (r"\bPERDIDA\b", "pérdida"),
         (r"\bSGL\b", "de señal"),
         (r"\bAPCH\b", "aproximación"),
         (r"\bBTN\b", "entre"),
+        (r"\bRDL\b", "radiales"),
+        (r"\bFM\s+([A-Za-z]{3})\s+VOR\b", r"del VOR \1"),
+        (r"\bPREVIA\s+COOR\b", "coordinación previa"),
+        (r"\bCOOR\b", "coordinación"),
+        (r"\bAEREOS\b", "aéreos"),
         (r"\bREQ\b", "solicitar"),
         (r"\bTORRE\b", "TWR"),
         (r"\bAERODROMO\b|\bAERÓDROMO\b", "AD"),
@@ -594,6 +667,7 @@ def translate_icao_to_spanish(n_obj):
     for pat, rep in abbrev_es:
         txt = re.sub(pat, rep, txt, flags=re.IGNORECASE)
     txt = re.sub(r"^posible\b", "Posible", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"^área\b", "Área", txt, flags=re.IGNORECASE)
     txt = re.sub(r"\.\s+([a-záéíóúñ])", lambda m: ". " + m.group(1).upper(), txt)
     txt = preserve_acronyms(txt)
     if sched and sched not in txt:
@@ -660,59 +734,123 @@ def build_spjc_svg_base_labels():
     return "\n".join(out)
 
 
-def build_spjc_proc_pins():
-    """Pines azules de procedimientos P1, P2, P3 sobre el plano oficial SPJC."""
-    pins = [
-        ("P1", 136 * 1.8, 514 * 1.2, 22, 6),
-        ("P2", 615 * 1.8, 228 * 1.2, 18, -10),
-        ("P2", 603 * 1.8, 191 * 1.2, 18, -10),
-        ("P3", 107 * 1.8, 434 * 1.2, -32, -8),
-        ("P3", 928 * 1.8, 108 * 1.2, 16, -6),
-    ]
+def build_spjc_proc_pins(active):
+    """Puntos azules aproximados de todos los procedimientos activos (P1 a P7) sobre el plano oficial SPJC."""
     out = []
-    for lbl, x, y, dx, dy in pins:
+    if "A3523/26" in active:
+        x, y = 136 * 1.8, 514 * 1.2
         out.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
-            f'<text x="{x+dx:.1f}" y="{y+dy:.1f}" class="pin-lbl">{lbl}</text>'
+            f'<text x="{x+20:.1f}" y="{y+6:.1f}" class="pin-lbl">P1</text>'
+        )
+    if "A2828/26" in active or "A2830/26" in active:
+        for nx, ny in [(615, 228), (603, 191)]:
+            x, y = nx * 1.8, ny * 1.2
+            out.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+                f'<text x="{x+18:.1f}" y="{y-10:.1f}" class="pin-lbl">P2</text>'
+            )
+    if "A2827/26" in active:
+        for nx, ny, dx, dy in [(107, 434, -32, -8), (928, 108, 16, -6)]:
+            x, y = nx * 1.8, ny * 1.2
+            out.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+                f'<text x="{x+dx:.1f}" y="{y+dy:.1f}" class="pin-lbl">P3</text>'
+            )
+    if "A3424/26" in active:
+        for x, y, dx, dy in [(620, 422, 16, -12), (650, 954, 16, 26)]:
+            out.append(
+                f'<circle cx="{x}" cy="{y}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+                f'<text x="{x+dx}" y="{y+dy}" class="pin-lbl">P4</text>'
+            )
+    if "A3341/26" in active:
+        x, y = 335, 1046
+        out.append(
+            f'<circle cx="{x}" cy="{y}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+            f'<text x="{x+16}" y="{y+26}" class="pin-lbl">P5</text>'
+        )
+    if "A3527/26" in active:
+        for bx, by in [(705, 342), (975, 272), (1055, 248), (1185, 212), (1285, 182)]:
+            out.append(f'<circle cx="{bx}" cy="{by}" r="8" fill="#1d4ed8" stroke="#ffffff" stroke-width="2.5"/>')
+        out.append('<text x="718" y="366" class="pin-lbl">P6</text>')
+    if "A2863/26" in active:
+        x, y = 1395, 259
+        out.append(
+            f'<circle cx="{x}" cy="{y}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="3"/>'
+            f'<text x="{x+16}" y="{y+8}" class="pin-lbl">P7</text>'
         )
     return "\n".join(out)
 
 
-def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_dt):
+def render_spjc_day_canvas(active, bg_uri, day_items, today_date, cutoff_local_dt):
+    """
+    Plano oficial SPJC Día siguiendo convención estricta:
+    - Cierres: toda la superficie cerrada en ROJO sólido.
+    - Obras: puntos aproximados en NARANJA.
+    - Procedimientos: puntos aproximados en AZUL (P1–P7).
+    """
     overlays = []
-    if "A3730/26" in active:
-        overlays.append(
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="26" stroke-opacity="0.45" stroke-linecap="butt"/>'
-            '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="6" stroke-dasharray="18,10"/>'
-        )
-    if "A2863/26" in active:
-        overlays.append(
-            '<line x1="1125" y1="340" x2="1665" y2="178" stroke="#d97706" stroke-width="10" stroke-opacity="0.6" stroke-dasharray="12,8"/>'
-        )
-    if "A3527/26" in active:
-        for bx, by in [(705, 342), (975, 272), (1055, 248), (1185, 212), (1285, 182)]:
-            overlays.append(f'<circle cx="{bx}" cy="{by}" r="7" fill="#f59e0b" stroke="#78350f" stroke-width="2"/>')
-
-    active_day = [c for c in day_cards if c[0] in active]
-    if active_day:
-        rows_html = []
-        for nid, title, body, sched, tone in active_day:
-            badge = '<span class="badge-new">NUEVO</span>' if is_red_notam(active[nid], today_date, cutoff_local_dt) else ""
-            rows_html.append(
-                f'<div class="uleg-item"><a href="#{anchor_id(nid)}" class="notam-link">{html.escape(nid)}</a>{badge} '
-                f'<strong>{html.escape(title)}:</strong> {html.escape(body)} <span class="uchip-dt">({html.escape(sched)})</span></div>'
+    for nid, cat, zone_lbl, f_rng, slot, tone, geom_type, coords in day_items:
+        if geom_type == "rwy_16l":
+            overlays.append(
+                '<line x1="186" y1="548" x2="1658" y2="124" stroke="#c53929" stroke-width="28" stroke-opacity="0.65" stroke-linecap="butt"/>'
+                '<line x1="186" y1="548" x2="1658" y2="124" stroke="#991b1b" stroke-width="5"/>'
             )
-        legend_html = f"""
-        <div class="uleg-box">
-          <div class="uleg-hdr">AFECTACIONES DIURNAS TEMPORALES</div>
-          <div class="uleg-list">{''.join(rows_html)}</div>
-        </div>
-        """
+        elif geom_type == "rwy_16r":
+            overlays.append(
+                '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="28" stroke-opacity="0.65" stroke-linecap="butt"/>'
+                '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#991b1b" stroke-width="5"/>'
+            )
+        elif geom_type == "pts":
+            col = "#ea580c" if tone == "orange" else ("#1d4ed8" if tone == "blue" else "#c53929")
+            for px, py in coords:
+                overlays.append(f'<circle cx="{px}" cy="{py}" r="11" fill="{col}" stroke="#ffffff" stroke-width="3"/>')
+
+    if day_items:
+        by_slot = {}
+        for it in day_items:
+            by_slot.setdefault((it[0] if False else it[4], it[1], it[5]), []).append(it)
+
+        # Agrupar por (slot, tone) igual que en el bloque nocturno
+        slot_groups = {}
+        for it in day_items:
+            slot_groups.setdefault(it[4], []).append(it)
+
+        blocks = []
+        for slot_lbl, s_items in slot_groups.items():
+            all_orange = all(it[5] == "orange" for it in s_items)
+            all_blue = all(it[5] == "blue" for it in s_items)
+            box_cls = "uleg-box uleg-box-orange" if all_orange else ("uleg-box uleg-box-blue" if all_blue else "uleg-box")
+            hdr_cls = "uleg-hdr uleg-hdr-orange" if all_orange else ("uleg-hdr uleg-hdr-blue" if all_blue else "uleg-hdr")
+            hdr_prefix = "OBRAS DIURNAS UNIFICADAS" if all_orange else "AFECTACIONES DIURNAS UNIFICADAS"
+
+            rows_html = []
+            for nid, cat, zone_lbl, f_rng, _, tone, _, _ in s_items:
+                is_new = is_red_notam(active[nid], today_date, cutoff_local_dt)
+                b_new = ' <span class="badge-new">N</span>' if is_new else ""
+                chip_cls = "uchip-orange" if tone == "orange" else ("uchip-blue" if tone == "blue" else "uchip-red")
+                dt_part = f' <span class="uchip-dt">({html.escape(f_rng)})</span>' if f_rng else ""
+                rows_html.append(
+                    f'<span class="uchip {chip_cls}"><a href="#{anchor_id(nid)}" class="notam-link">{html.escape(nid)}</a>{b_new} '
+                    f'{html.escape(zone_lbl)}{dt_part}</span>'
+                )
+            blocks.append(f"""
+            <div class="{box_cls}">
+              <div class="{hdr_cls}">
+                <span>{hdr_prefix} · HORARIO COMÚN: <strong>{html.escape(slot_lbl)}</strong></span>
+                <span class="uleg-subnote">Puntos naranjas aproximados en el plano</span>
+              </div>
+              <table class="uleg-tbl"><tbody>
+                <tr><td class="uleg-cat">Obras / Superficie</td><td class="uleg-chips">{" ".join(rows_html)}</td></tr>
+              </tbody></table>
+            </div>
+            """)
+        legend_html = "".join(blocks)
     else:
         legend_html = """
         <div class="uleg-box uleg-box-blue">
           <div class="uleg-hdr uleg-hdr-blue">ESTADO DIURNO (07:00 – 19:00 HL)</div>
-          <div class="uleg-empty">Sin cierres temporales diurnos de RWY/TWY activos hoy. Aplican en el plano oficial las referencias azules <strong>P1, P2, P3</strong> y las limitaciones continuas (<strong>TWY L L5–L7</strong> y <strong>marcas 16L</strong>) detalladas en la banda inferior.</div>
+          <div class="uleg-empty">Sin cierres ni obras temporales diurnas activas hoy. Aplican en el plano oficial los puntos azules <strong>P1–P7</strong> detallados en la banda inferior de procedimientos.</div>
         </div>
         """
 
@@ -721,7 +859,7 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
       <svg viewBox="0 15 1800 1165" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
         <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
         {''.join(overlays)}
-        {build_spjc_proc_pins()}
+        {build_spjc_proc_pins(active)}
         {build_spjc_svg_base_labels()}
       </svg>
     </div>
@@ -731,49 +869,33 @@ def render_spjc_day_canvas(active, bg_uri, day_cards, today_date, cutoff_local_d
 
 def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_local_dt):
     """
-    Plano oficial SPJC Noche sin tarjetas flotantes ni líneas cruzadas
-    + Leyenda Unificada agrupada por horario común (ej. 01:30 – 04:30 HL).
+    Plano oficial SPJC Noche siguiendo convención estricta:
+    - Cierres: abarcan toda la superficie cerrada en ROJO sólido (RWY, tramos TWY M y puertas de transferencia).
+    - Obras: puntos aproximados en NARANJA (ej. franja RWY 16R/34L).
+    - Procedimientos: puntos aproximados en AZUL (P1–P7).
     """
     overlays = []
-    has_rwy_clsd = False
-    has_strip = False
-    has_twy_m = False
-    has_twy_u = False
+    drawn_rwy_16r = False
 
-    for nid, cat, zone_lbl, f_rng, slot, tone, (px, py) in night_items:
-        u = extract_item_e(active[nid]["icaoMessage"]).upper()
-        if "RWY 16R/34L CLSD" in u:
-            has_rwy_clsd = True
-        elif "STRIP RWY 16R/34L" in u:
-            has_strip = True
-        elif cat in ("Tramos TWY M", "Puertas M1–M4"):
-            has_twy_m = True
-        elif cat == "Puertas U":
-            has_twy_u = True
+    # Primero dibujar superficies cerradas en rojo sólido, luego puntos naranjas de obras encima
+    for nid, cat, zone_lbl, f_rng, slot, tone, geom_type, coords in night_items:
+        if geom_type == "rwy_16r" and not drawn_rwy_16r:
+            drawn_rwy_16r = True
+            overlays.append(
+                '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="28" stroke-opacity="0.65" stroke-linecap="butt"/>'
+                '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#991b1b" stroke-width="5"/>'
+            )
+        elif geom_type == "seg":
+            for x1, y1, x2, y2 in coords:
+                overlays.append(
+                    f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#c53929" stroke-width="18" stroke-opacity="0.78" stroke-linecap="butt"/>'
+                )
 
-    if has_rwy_clsd:
-        overlays.append(
-            '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="24" stroke-opacity="0.48"/>'
-            '<line x1="38" y1="1132" x2="1510" y2="704" stroke="#c53929" stroke-width="5"/>'
-        )
-    if has_strip:
-        overlays.append(
-            '<line x1="32" y1="1102" x2="1502" y2="674" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-            '<line x1="46" y1="1162" x2="1518" y2="734" stroke="#d97706" stroke-width="5" stroke-dasharray="14,10"/>'
-        )
-    if has_twy_m:
-        overlays.append(
-            '<line x1="822" y1="472" x2="1445" y2="288" stroke="#c53929" stroke-width="11" stroke-opacity="0.48" stroke-dasharray="14,8"/>'
-        )
-    if has_twy_u:
-        overlays.append(
-            '<line x1="1205" y1="684" x2="1395" y2="626" stroke="#c53929" stroke-width="11" stroke-opacity="0.48" stroke-dasharray="14,8"/>'
-        )
-
-    for nid, cat, zone_lbl, f_rng, slot, tone, (px, py) in night_items:
-        if py < 740:
-            col_str = "#d97706" if tone == "amber" else "#c53929"
-            overlays.append(f'<circle cx="{px}" cy="{py}" r="10" fill="{col_str}" stroke="#ffffff" stroke-width="2.5"/>')
+    for nid, cat, zone_lbl, f_rng, slot, tone, geom_type, coords in night_items:
+        if geom_type == "pts":
+            col = "#ea580c" if tone == "orange" else "#1d4ed8"
+            for px, py in coords:
+                overlays.append(f'<circle cx="{px}" cy="{py}" r="11" fill="{col}" stroke="#ffffff" stroke-width="3"/>')
 
     # Agrupar NOTAMs nocturnos por franja horaria común (ej. '01:30 – 04:30 HL')
     by_slot = {}
@@ -785,14 +907,14 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
     for slot_lbl, s_items in by_slot.items():
         rows_html = []
         for cat in cat_order:
-            c_items = sorted([it for it in s_items if it[1] == cat], key=lambda x: x[6][0])
+            c_items = sorted([it for it in s_items if it[1] == cat], key=lambda x: x[7][0][0] if x[7] else 0)
             if not c_items:
                 continue
             chips = []
-            for nid, _, zone_lbl, f_rng, _, tone, _ in c_items:
+            for nid, _, zone_lbl, f_rng, _, tone, _, _ in c_items:
                 is_new = is_red_notam(active[nid], today_date, cutoff_local_dt)
                 b_new = '<span class="badge-new">N</span>' if is_new else ""
-                cls_chip = "uchip-amber" if tone == "amber" else "uchip-red"
+                cls_chip = "uchip-orange" if tone in ("amber", "orange") else ("uchip-blue" if tone == "blue" else "uchip-red")
                 dt_part = f' <span class="uchip-dt">({html.escape(f_rng)})</span>' if f_rng else ""
                 chips.append(
                     f'<span class="uchip {cls_chip}"><a href="#{anchor_id(nid)}" class="notam-link">{html.escape(nid)}</a>{b_new} '
@@ -816,7 +938,7 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
       <svg viewBox="0 15 1800 1165" class="canvas-svg" xmlns="http://www.w3.org/2000/svg">
         <image href="{bg_uri}" x="0" y="0" width="1800" height="1200"/>
         {''.join(overlays)}
-        {build_spjc_proc_pins()}
+        {build_spjc_proc_pins(active)}
         {build_spjc_svg_base_labels()}
       </svg>
     </div>
@@ -825,21 +947,23 @@ def render_spjc_night_canvas(active, bg_uri, night_items, today_date, cutoff_loc
 
 
 def render_spzo_canvas(active, bg_uri, spzo_specs, today_date, cutoff_local_dt):
-    """Plano oficial AD 2 SPZO 09 de CUSCO · SPZO + Leyenda Unificada por horario/vigencia."""
+    """
+    Plano oficial AD 2 SPZO 09 de CUSCO · SPZO:
+    - Cierres (ej. A3707/26): toda la superficie cerrada en ROJO sólido.
+    - Obras / precaución pavimento (ej. A3711/26): punto aproximado en NARANJA.
+    - Procedimientos / restricciones operativas (ej. A3740/26 giro 180°): puntos aproximados en AZUL.
+    """
     overlays = []
-    if "A3740/26" in active:
-        overlays.append(
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#d97706" stroke-width="22" stroke-opacity="0.38"/>'
-            '<line x1="75" y1="68" x2="1868" y2="75" stroke="#c53929" stroke-width="4" stroke-dasharray="16,10"/>'
-        )
     if "A3707/26" in active:
         overlays.append(
-            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="18" stroke-opacity="0.48" stroke-linecap="round"/>'
-            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="4" stroke-dasharray="12,7"/>'
+            '<line x1="455" y1="152" x2="735" y2="152" stroke="#c53929" stroke-width="20" stroke-opacity="0.72" stroke-linecap="butt"/>'
         )
+    if "A3740/26" in active:
+        for bx, by in [(180, 70), (970, 72), (1760, 74)]:
+            overlays.append(f'<circle cx="{bx}" cy="{by}" r="11" fill="#1d4ed8" stroke="#ffffff" stroke-width="2.8"/>')
     if "A3711/26" in active:
         overlays.append(
-            '<circle cx="527" cy="148" r="10" fill="#d97706" stroke="#ffffff" stroke-width="2.5"/>'
+            '<circle cx="527" cy="148" r="11" fill="#ea580c" stroke="#ffffff" stroke-width="2.8"/>'
         )
 
     labels = [
@@ -871,14 +995,14 @@ def render_spzo_canvas(active, bg_uri, spzo_specs, today_date, cutoff_local_dt):
         for nid, title, body, sched, tone in items:
             b_new = ' <span class="badge-new">NUEVO</span>' if is_red_notam(active[nid], today_date, cutoff_local_dt) else ""
             desde_loc = fmt_local_short(active[nid].get("startDate"))
-            link_col = "#b91c1c" if tone == "red" else "#b45309"
+            link_col = "#b91c1c" if tone == "red" else ("#1d4ed8" if tone == "blue" else "#c2410c")
             rows.append(
                 f'<tr><td class="uleg-cat" style="width:19%;"><a href="#{anchor_id(nid)}" style="color:{link_col}; text-decoration:underline; font-size:8.5px; font-weight:800;">{html.escape(nid)}</a>{b_new} · <strong>{html.escape(title)}</strong></td>'
                 f'<td class="uleg-chips" style="font-size:8.2px; padding:4.5px 8px;">{html.escape(body)} <span class="uchip-dt" style="font-size:7.6px;">(Desde {desde_loc} HL)</span></td></tr>'
             )
         leg_blocks.append(f"""
-        <div class="uleg-box" style="margin-bottom:10px;">
-          <div class="uleg-hdr" style="font-size:8.5px; padding:5px 8px;">
+        <div class="uleg-box uleg-box-blue" style="margin-bottom:10px;">
+          <div class="uleg-hdr uleg-hdr-blue" style="font-size:8.5px; padding:5px 8px;">
             <span>LEYENDA UNIFICADA SPZO · <strong>{html.escape(grp_key)}</strong></span>
           </div>
           <table class="uleg-tbl"><tbody>{''.join(rows)}</tbody></table>
@@ -1113,6 +1237,11 @@ def build_unified_report():
         "A3730/26", "A3523/26", "A2828/26", "A2830/26", "A2827/26", "A3424/26",
         "A3341/26", "A3527/26", "A2863/26", "A3740/26", "A3707/26", "A3711/26",
     }
+    spjc_day_items = []
+    if "A3730/26" in active:
+        cat, zlbl, frng, slt, tn, gtype, crds = classify_spjc_day_surface(active["A3730/26"])
+        spjc_day_items.append(("A3730/26", cat, zlbl, frng, slt, tn, gtype, crds))
+
     extra_spjc_day = []
     spjc_night_items = []
     extra_spzo_cards = []
@@ -1125,17 +1254,20 @@ def build_unified_report():
         if is_excluded_non_ans(msg_e, icao, indicadores):
             continue
         if icao == "SPJC" and is_movement_area_spjc_spzo(icao, msg_e) and is_spjc_night_notam(n_obj):
-            cat, zone_lbl, f_rng, slot, tone, pin_xy = classify_spjc_night_surface(n_obj)
-            spjc_night_items.append((nid, cat, zone_lbl, f_rng, slot, tone, pin_xy))
+            cat, zone_lbl, f_rng, slot, tone, geom_type, coords = classify_spjc_night_surface(n_obj)
+            spjc_night_items.append((nid, cat, zone_lbl, f_rng, slot, tone, geom_type, coords))
             continue
         if not is_ans_reportable(n_obj, indicadores):
             continue
         if is_movement_area_spjc_spzo(icao, msg_e):
-            sched = f"Vig: {fmt_local_short(n_obj.get('startDate'))} - {fmt_local_short(n_obj.get('endDate'))} LOCAL"
             if icao == "SPJC":
-                extra_spjc_day.append((nid, "RWY / TWY", translate_icao_to_spanish(n_obj), sched, "red"))
+                cat, zone_lbl, f_rng, slot, tone, geom_type, coords = classify_spjc_day_surface(n_obj)
+                extra_spjc_day.append((nid, cat, zone_lbl, f_rng, slot, tone, geom_type, coords))
             else:
-                extra_spzo_cards.append((nid, "RWY / TWY", translate_icao_to_spanish(n_obj), sched, "red"))
+                sched = f"Vig: {fmt_local_short(n_obj.get('startDate'))} - {fmt_local_short(n_obj.get('endDate'))} LOCAL"
+                u_spzo = msg_e.upper()
+                tn_spzo = "red" if "CLSD" in u_spzo else ("orange" if ("WIP" in u_spzo or "DEPRESSION" in u_spzo or "CTN" in u_spzo) else "blue")
+                extra_spzo_cards.append((nid, "RWY / TWY", translate_icao_to_spanish(n_obj), sched, tn_spzo))
             continue
 
         if icao in LIMA_ICAOS:
@@ -1178,27 +1310,27 @@ def build_unified_report():
         ("A3730/26", "RWY 16L/34R", "No disponible para aterrizajes ni despegues. RWY 16R/34L en uso. Salidas por 16R con ascenso en rumbo de RWY y viraje a la derecha directo a JC921.", "Vig: 19/11 18:20 - 22/11 17:30 · Cierre: 12:30-14:30 y 16:00-17:30 LOCAL", "red"),
     ]
 
-    # Procedimientos en superficie SPJC (strip inferior unificado)
+    # Procedimientos en superficie SPJC (strip inferior unificado, todos en AZUL con puntos P1-P7 en el mapa)
     spjc_procs_spec = [
         ("A3523/26", "P1 · TWY L", "Espera 16L en TWY L (L1 no es punto de espera). No cruzar sin autorización ATC.", "Todo el día · Hasta 31/01/27", "blue"),
         ("A2828/26", "P2 · L5 y D (Bidirec.)", "RWY 16L/34R en uso bidireccional: esperar antes de CAT I y reportar RWY libre.", "06:00-18:00 · Hasta 26/11", "blue"),
         ("A2830/26", "P2 · L5 y D (Unidirec.)", "Uso unidireccional oeste a este: esperar antes de CAT I y cruzar antes de reportar libre.", "18:01-05:59 · Hasta 26/11", "blue"),
         ("A2827/26", "P3 · Remolque A-L / F-L7", "Suspende SUP 12/24. Cruce remolque vía A-L y F-L7 esperando antes de CAT I.", "Todo el día · Hasta 26/11", "blue"),
-        ("A3424/26", "Segregadas 16R / 16L", "RWY 16R solo aterrizajes y RWY 16L solo despegues (exc. emerg./medevac/HEAD).", "06:00-23:59 · Hasta 24/01/27", "blue"),
-        ("A3341/26", "RWY 16R desde V2", "TORA 2773 m desde V2. Salidas de Plat. 1 que no puedan despegar en V2 notificar GND.", "Todo el día · Hasta 20/01/27", "blue"),
-        ("A3527/26", "Marcas 16L (B,C,D,E,G)", "Señalización puntos de espera 16L no disp. Reportar libre al ingresar total a A o F.", "Todo el día · Hasta 02/02/27", "amber"),
-        ("A2863/26", "TWY L (L5-L7) CAT D/E", "No disponible para rodaje CAT D y E. RWY 34R disponible vía TWY F.", "Todo el día · Hasta 30/11", "amber"),
+        ("A3424/26", "P4 · Segregadas 16R / 16L", "RWY 16R solo aterrizajes y RWY 16L solo despegues (exc. emerg./medevac/HEAD).", "06:00-23:59 · Hasta 24/01/27", "blue"),
+        ("A3341/26", "P5 · RWY 16R desde V2", "TORA 2773 m desde V2. Salidas de Plat. 1 que no puedan despegar en V2 notificar GND.", "Todo el día · Hasta 20/01/27", "blue"),
+        ("A3527/26", "P6 · Marcas 16L (B,C,D,E,G)", "Señalización puntos de espera 16L no disp. Reportar libre al ingresar total a A o F.", "Todo el día · Hasta 02/02/27", "blue"),
+        ("A2863/26", "P7 · TWY L (L5-L7) CAT D/E", "No disponible para rodaje CAT D y E. RWY 34R disponible vía TWY F.", "Todo el día · Hasta 30/11", "blue"),
     ]
     spjc_procs_html = []
     for nid, title, body, sched, tone in spjc_procs_spec:
         if nid in active:
             spjc_procs_html.append(card_link(nid, title, body, sched, tone))
 
-    # Tarjetas CUSCO SPZO (Pagina 2)
+    # Tarjetas CUSCO SPZO (Pagina 2: Azul=procedimiento, Rojo=cierre superficie, Naranja=obras/precaución)
     spzo_cards_spec = [
-        ("A3740/26", "RWY 10/28", "Prohibido el giro de 180° en RWY 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de RWY).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3740/26" in active else None,
-        ("A3707/26", "Parte de TWY C", "Cierre por obras hasta antes de TWY D (trazo de sector aproximado; zona señalizada).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
-        ("A3711/26", "Inicio de TWY C", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "amber") if "A3711/26" in active else None,
+        ("A3740/26", "RWY 10/28 (Procedimiento)", "Prohibido el giro de 180° en RWY 10/28 para evitar deterioro de la capa asfáltica (reemplaza a A3712/26; no declara cierre de RWY).", f"Vig: {fmt_local_short(active['A3740/26']['startDate'])} - {fmt_local_short(active['A3740/26']['endDate'])} LOCAL · Aplicación continua", "blue") if "A3740/26" in active else None,
+        ("A3707/26", "Parte de TWY C (Cierre)", "Cierre por obras hasta antes de TWY D (superficie cerrada en rojo).", f"Vig: {fmt_local_short(active['A3707/26']['startDate'])} - {fmt_local_short(active['A3707/26']['endDate'])} LOCAL · Aplicación continua", "red") if "A3707/26" in active else None,
+        ("A3711/26", "Inicio de TWY C (Obras / Precaución)", "Precaución por depresión de pavimento al inicio de TWY C (zona señalizada).", f"Vig: {fmt_local_short(active['A3711/26']['startDate'])} - {fmt_local_short(active['A3711/26']['endDate'])} LOCAL · Aplicación continua", "orange") if "A3711/26" in active else None,
     ]
     spzo_obs_html = (
         "Representación gráfica sobre el plano oficial AD 2 SPZO 09 · Las afectaciones vigentes de igual horario/régimen se agrupan en la leyenda unificada superior sin duplicar información."
@@ -1215,6 +1347,12 @@ def build_unified_report():
     # =========================================================================
     # UNIFICAR FILAS DEL MISMO AERODROMO QUE COMPARTEN EL MISMO HORARIO Y VIGENCIA
     # =========================================================================
+    def is_spanish_notam_row(row):
+        if str(row["notam"]).upper().startswith("C"):
+            return True
+        e_up = extract_item_e(row["raw"].get("icaoMessage", "")).upper()
+        return bool(re.search(r"\b(DEBIDO|EJERCICIOS|PARACAIDISMO|ESPACIOS|REQUIERE|ZONA\s+[A-Z0-9\-]+\s+BTN|FUERA\s+DE\s+SERVICIO|PERDIDA)\b", e_up))
+
     def unify_same_schedule_rows(rows):
         grouped = []
         idx_map = {}
@@ -1225,6 +1363,7 @@ def build_unified_report():
                 nr = dict(r)
                 nr["notams"] = [r["notam"]]
                 nr["notam_inis"] = [r["notam_ini"]]
+                nr["has_es"] = is_spanish_notam_row(r)
                 idx_map[key] = len(grouped)
                 grouped.append(nr)
             else:
@@ -1233,13 +1372,21 @@ def build_unified_report():
                 if r["notam_ini"] not in g["notam_inis"]:
                     g["notam_inis"].append(r["notam_ini"])
                 g["dias"] = max(g["dias"], r["dias"])
-                # Fusionar limpiamente cierre de RWY + cierre de TWY sin repetir fechas/horarios
-                m1 = re.match(r"^(RWY\s+[0-9/LRC]+)\s+cerrada\s+(por trabajos de mantenimiento.*)$", g["texto"], re.IGNORECASE)
-                m2 = re.match(r"^(TWY\s+[A-Z0-9,\s/y]+?)\s+cerradas?\b", r["texto"], re.IGNORECASE)
-                if m1 and m2:
-                    g["texto"] = f"{m1.group(1)} y {m2.group(1)} cerradas {m1.group(2)}"
+                r_is_es = is_spanish_notam_row(r)
+                # Par bilingüe (ej. Serie A en inglés + Serie C en español para el mismo evento): conservar SOLO el texto en español
+                prefixes = {str(n)[0].upper() for n in g["notams"] if n}
+                if ("A" in prefixes and "C" in prefixes) or (r_is_es != g.get("has_es", False)):
+                    if r_is_es and not g.get("has_es", False):
+                        g["texto"] = r["texto"]
+                        g["has_es"] = True
                 else:
-                    g["texto"] = g["texto"].rstrip(".") + "; asimismo, " + r["texto"]
+                    # Fusionar limpiamente cierre de RWY + cierre de TWY sin repetir fechas/horarios
+                    m1 = re.match(r"^(RWY\s+[0-9/LRC]+)\s+cerrada\s+(por trabajos de mantenimiento.*)$", g["texto"], re.IGNORECASE)
+                    m2 = re.match(r"^(TWY\s+[A-Z0-9,\s/y]+?)\s+cerradas?\b", r["texto"], re.IGNORECASE)
+                    if m1 and m2:
+                        g["texto"] = f"{m1.group(1)} y {m2.group(1)} cerradas {m1.group(2)}"
+                    elif r["texto"].strip().lower() != g["texto"].strip().lower():
+                        g["texto"] = g["texto"].rstrip(".") + "; asimismo, " + r["texto"]
                 # Limpiar referencias cruzadas redundantes entre los mismos NOTAMs ya unificados
                 obs_parts = []
                 for o in (g["obs"], r["obs"]):
@@ -1300,7 +1447,7 @@ def build_unified_report():
     # CONSTRUIR ANEXO DE REFERENCIA OACI (TODOS LOS NOTAMS CITADOS EN PLANOS Y TABLA)
     # =========================================================================
     cited_ids = []
-    for nid, *_ in spjc_day_cards_spec + extra_spjc_day + spjc_night_items + spjc_procs_spec:
+    for nid, *_ in spjc_day_items + extra_spjc_day + spjc_night_items + spjc_procs_spec:
         if nid in active and nid not in cited_ids:
             cited_ids.append(nid)
     for spec in spzo_cards_spec + extra_spzo_cards:
@@ -1534,6 +1681,10 @@ def build_unified_report():
     border-color: #bfdbfe;
     background: #f8fafc;
   }}
+  .uleg-box-orange {{
+    border-color: #fdba74;
+    background: #fffaf5;
+  }}
   .uleg-hdr {{
     background: #fef2f2;
     border-bottom: 1px solid #fecaca;
@@ -1551,6 +1702,11 @@ def build_unified_report():
     background: #eff6ff;
     border-bottom-color: #bfdbfe;
     color: #1e3a8a;
+  }}
+  .uleg-hdr-orange {{
+    background: #ffedd5;
+    border-bottom-color: #fdba74;
+    color: #c2410c;
   }}
   .uleg-subnote {{
     font-size: 6.6px;
@@ -1599,12 +1755,18 @@ def build_unified_report():
     background: #fffafa;
   }}
   .uchip-red .notam-link {{ color: #b91c1c; text-decoration: underline; font-weight: 800; }}
-  .uchip-amber {{
-    border-color: #fcd34d;
-    border-left: 2.5px solid #d97706;
-    background: #fffbeb;
+  .uchip-amber, .uchip-orange {{
+    border-color: #fdba74;
+    border-left: 2.5px solid #ea580c;
+    background: #fff7ed;
   }}
-  .uchip-amber .notam-link {{ color: #b45309; text-decoration: underline; font-weight: 800; }}
+  .uchip-amber .notam-link, .uchip-orange .notam-link {{ color: #c2410c; text-decoration: underline; font-weight: 800; }}
+  .uchip-blue {{
+    border-color: #93c5fd;
+    border-left: 2.5px solid #2563eb;
+    background: #eff6ff;
+  }}
+  .uchip-blue .notam-link {{ color: #1d4ed8; text-decoration: underline; font-weight: 800; }}
   .uchip-dt {{
     font-weight: 600;
     color: #475569;
@@ -1638,7 +1800,7 @@ def build_unified_report():
     align-items: center;
   }}
   .dot-r {{ color: #c53929; font-weight: 800; }}
-  .dot-a {{ color: #d97706; font-weight: 800; }}
+  .dot-a {{ color: #ea580c; font-weight: 800; }}
   .dot-b {{ color: #2563eb; font-weight: 800; }}
 
   /* Pagina 2 tarjetas Cusco mas legibles */
@@ -1793,7 +1955,7 @@ def build_unified_report():
   </div>
 
   <div class="legend-bar">
-    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> obras / limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento &nbsp;|&nbsp; Clic en cada código NOTAM para ver el texto íntegro OACI.</div>
+    <div><span class="dot-r">■ ROJO:</span> cierre (superficie cerrada completa) &nbsp;|&nbsp; <span class="dot-a">● NARANJA:</span> obras / precaución (puntos aprox.) &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimientos (puntos aprox.) &nbsp;|&nbsp; Clic en cada código NOTAM para texto OACI.</div>
     <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Trazado referencial sobre AIRAC AIP SUP 34/2025</div>
   </div>
 
@@ -1802,9 +1964,9 @@ def build_unified_report():
     <div class="panel">
       <div class="panel-hdr">
         <span class="panel-title">DÍA | 07:00 – 19:00 HORA LOCAL</span>
-        <span class="panel-sub">Pistas, calles de rodaje y procedimientos diurnos</span>
+        <span class="panel-sub">Pistas, calles de rodaje, obras y procedimientos diurnos</span>
       </div>
-      {render_spjc_day_canvas(active, spjc_bg_uri, spjc_day_cards_spec + extra_spjc_day, today_date, cutoff_local_dt)}
+      {render_spjc_day_canvas(active, spjc_bg_uri, spjc_day_items + extra_spjc_day, today_date, cutoff_local_dt)}
     </div>
 
     <!-- BLOQUE NOCHE -->
@@ -1819,7 +1981,7 @@ def build_unified_report():
 
   <!-- PROCEDIMIENTOS Y LIMITACIONES CONTINUAS SPJC -->
   <div class="procs-strip">
-    <div class="procs-title">PROCEDIMIENTOS Y RESTRICCIONES EN SUPERFICIE SPJC (P1: espera TWY L · P2: cruces L5 y D · P3: remolque A-L y F-L7 · operaciones segregadas y rodaje)</div>
+    <div class="procs-title">PROCEDIMIENTOS EN SUPERFICIE SPJC · PUNTOS AZULES EN EL PLANO (P1: TWY L · P2: L5 y D · P3: remolque · P4: segregadas · P5: V2 · P6: marcas 16L · P7: TWY L CAT D/E)</div>
     <div class="procs-grid">
       {''.join(spjc_procs_html)}
     </div>
@@ -1843,7 +2005,7 @@ def build_unified_report():
   </div>
 
   <div class="legend-bar" style="margin-bottom: 10px;">
-    <div><span class="dot-r">■ ROJO:</span> cierre / indisponibilidad &nbsp;|&nbsp; <span class="dot-a">■ ÁMBAR:</span> limitación / precaución &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimiento / disponibilidad</div>
+    <div><span class="dot-r">■ ROJO:</span> cierre (superficie cerrada completa) &nbsp;|&nbsp; <span class="dot-a">● NARANJA:</span> obras / precaución (puntos aprox.) &nbsp;|&nbsp; <span class="dot-b">● AZUL:</span> procedimientos (puntos aprox.)</div>
     <div>Expresado en <strong>Hora Local (UTC-5)</strong> · Geometría manual referencial sobre AD 2 SPZO 09</div>
   </div>
 
